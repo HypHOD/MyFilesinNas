@@ -1,0 +1,13 @@
+[project]
+name = "mini-harness"
+version = "0.1.0"
+description = "A miniature plugin-based agent harness in Python, imitating DeepSeek Harness (dsh)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

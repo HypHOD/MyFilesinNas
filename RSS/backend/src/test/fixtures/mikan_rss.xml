@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Mikan Project - 番剧</title>
+    <link>https://mikanani.me</link>
+    <description>本地测试用蜜柑订阅源</description>
+    <item>
+      <title>[LoliHouse] 葬送的芙莉莲 - 05 [1080p].mkv</title>
+      <enclosure url="magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" type="application/x-bittorrent" length="1"/>
+      <link>https://mikanani.me/Home/Episode/aaaaaaaa</link>
+    </item>
+    <item>
+      <title>[Sakurato] 无职转生 S02E01 [1080p].mkv</title>
+      <enclosure url="magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" type="application/x-bittorrent" length="1"/>
+      <link>https://mikanani.me/Home/Episode/bbbbbbbb</link>
+    </item>
+  </channel>
+</rss>

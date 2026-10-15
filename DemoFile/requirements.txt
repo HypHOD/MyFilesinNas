@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic-settings
+pytest
+httpx
+pycryptodome

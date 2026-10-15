@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+webui/dist/
+webui/.vite/
+
+# Runtime data (created at run time, relative to backend/src)
+backend/src/data/
+backend/src/config/
+
+# Personal notes (interview prep etc., not part of the published repo)
+docs/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# Logs
+*.log
