@@ -2,3 +2,18 @@ backend/src/config/*
 backend/src/data/*
 
 docs/
+
+# 测试代码（仅本地运行，不纳入版本管理）
+/DemoFile/tests/
+/RSS/backend/src/test/
+/mini-harness/tests/
+
+# Python 缓存与编译产物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# 本地数据与系统文件
+*.bak
+.DS_Store
