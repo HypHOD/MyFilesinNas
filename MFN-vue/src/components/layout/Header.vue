@@ -118,7 +118,7 @@
             </div>
 
             <!-- 存储源选择（分享页不显示） -->
-            <div class="zfile-header-storage-select" v-if="isNotMobile && !isSharePage">
+            <div class="zfile-header-storage-select" v-if="isNotMobile && !isSharePage && !isWatchPage">
                 <el-select size="default" v-model="currentStorageKey" placeholder="请选择存储源">
                     <el-option v-for="item in storageList"
                                :key="item.key"
@@ -363,6 +363,7 @@ const toRss = () => {
 };
 
 const isSharePage = computed(() => !!route.params.shareKey);
+const isWatchPage = computed(() => route.path.startsWith("/bangumi"));
 const shareActiveStorageKey = computed(() => route.params.storageKey ? String(route.params.storageKey) : "");
 const myShareDialogVisible = ref(false);
 const openMyShare = () => {

@@ -61,6 +61,10 @@ export default function useHeaderStorageList() {
         if (routeRef.value?.path?.startsWith('/share')) {
             return;
         }
+        // 看番公开页同理：页面自行管理列表，不能被存储源列表覆盖或被重定向
+        if (routeRef.value?.path?.startsWith('/bangumi')) {
+            return;
+        }
         // 如果当前 URL 参数中有存储源 ID, 则直接用当前的.
         if (storageKey.value) {
             // 判断 url 中的 storageKey 是否存在于 storageList 中. 如果不存在, 则跳转到首页
