@@ -13,12 +13,14 @@
 		<el-footer>
 			<Footer></Footer>
 		</el-footer>
+		<AgentAssistant />
 	</el-container>
 </template>
 
 <script setup>
 import Header from "~/components/layout/Header.vue";
 import Footer from "~/components/layout/Footer.vue";
+import AgentAssistant from "~/components/agent/AgentAssistant.vue";
 import { loadGlobalSiteConfigReq } from "~/api/home/home";
 
 import useStorageConfigStore from "~/stores/storage-config";

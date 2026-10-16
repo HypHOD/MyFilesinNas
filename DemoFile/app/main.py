@@ -8,6 +8,8 @@ from app.core.auth import read_token
 from app.core.context import new_trace_id, set_current_user_id, set_request_info
 from app.core.exception_handlers import register_exception_handlers
 from app.models.user import ANONYMOUS_ID
+from app.agent.host import agent_host
+from app.modules.agent.router import router as agent_router
 from app.modules.config.router import router as site_router
 from app.modules.front.router import STATIC_DIR, router as front_router
 from app.modules.install.router import router as install_router
@@ -100,7 +102,10 @@ async def lifespan(app: FastAPI):
     # 启动装配：读 DB 里所有存储源 → 逐个 init + test_connection → 注册进 registry。
     # 同步阻塞调用放这里是合适的（启动期还没有请求要处理），别去 await to_thread。
     load_storage_sources()
+    # agent 宿主（Phase A）：缺 DEEPSEEK_API_KEY 时记日志跳过，不拖垮站点启动
+    await agent_host.start()
     yield
+    await agent_host.stop()
 
 
 app = FastAPI(
@@ -127,6 +132,7 @@ app.include_router(install_router, prefix="/api")
 app.include_router(site_router, prefix="/api")
 app.include_router(user_router)
 app.include_router(storage_router, prefix="/api")
+app.include_router(agent_router, prefix="/api")
 app.include_router(proxy_router)
 
 # 前端静态产物（与 Java file:static/ 同款外置目录，相对 CWD）

@@ -5,3 +5,5 @@ pydantic-settings
 pytest
 httpx
 pycryptodome
+# agent 接入（app/agent）：mini-harness 是 monorepo 内的本地包，相对本文件的路径
+-e ../mini-harness

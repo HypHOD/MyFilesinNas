@@ -178,6 +178,7 @@ declare global {
   const until: typeof import('@vueuse/core')['until']
   const useActiveElement: typeof import('@vueuse/core')['useActiveElement']
   const useAdminSetting: typeof import('../../src/composables/admin/useAdminSetting.js')['default']
+  const useAgentChat: typeof import('../../src/composables/agent/useAgentChat.js')['default']
   const useAnimate: typeof import('@vueuse/core')['useAnimate']
   const useArrayDifference: typeof import('@vueuse/core')['useArrayDifference']
   const useArrayEvery: typeof import('@vueuse/core')['useArrayEvery']
