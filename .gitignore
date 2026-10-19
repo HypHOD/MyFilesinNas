@@ -17,3 +17,6 @@ __pycache__/
 # 本地数据与系统文件
 *.bak
 .DS_Store
+
+# Docker 本地配置（含密钥）
+/.env

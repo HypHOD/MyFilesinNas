@@ -10,6 +10,11 @@
 
 与 dsh 的差异：多适配器路由简化为按 name 查找；砍掉 usage 计量、推理/图片块、
 prepareCall、llm-retry 服务；保留 ``max_tokens`` 截断时丢弃工具调用的规则。
+
+阅读提示：``agent_loop._generate()`` 的一次请求 = 本文件的
+``provider.stream()`` + ``BlockAssembler`` 折叠。重试不在这里——``LlmError``
+抛给 ``agent/request-error`` 事件决定。MockProvider 让 demo/测试无需网络，
+按脚本逐条吐出分片。
 """
 
 from __future__ import annotations
@@ -49,8 +54,8 @@ class LlmError(Exception):
 class GenerateOptions:
     provider: str
     model: str
-    messages: tuple[ModelMessage, ...]
-    tools: tuple[dict[str, Any], ...]
+    messages: tuple[ModelMessage, ...]  # 来自 session.derive_messages()
+    tools: tuple[dict[str, Any], ...]   # 来自 tools.schemas()（只有白名单字段）
 
 
 class LlmProvider(Protocol):
@@ -76,12 +81,14 @@ class BlockAssembler:
     """
 
     def __init__(self) -> None:
+        # index → 槽位；不同 index 的文本块/工具调用可以交错到达，最终按 index 排序。
         self._slots: dict[int, dict[str, Any]] = {}
         self._finish_reason: FinishReason | None = None
-        self._text_prefix = ""
+        self._text_prefix = ""  # 全部文本的已到达前缀（取消时落 interrupted 消息用）
 
     def push(self, chunk: StreamChunk) -> None:
         if isinstance(chunk, BlockStart):
+            # 新开一个 index 槽位；后续 delta 都往这个槽里累积
             self._slots[chunk.index] = {
                 "type": chunk.block_type,
                 "text": "",
@@ -92,17 +99,18 @@ class BlockAssembler:
         elif isinstance(chunk, TextDelta):
             slot = self._slots[chunk.index]
             slot["text"] += chunk.text
-            self._text_prefix += chunk.text
+            self._text_prefix += chunk.text  # 同时维护取消时用的文本前缀
         elif isinstance(chunk, ToolCallDelta):
             slot = self._slots[chunk.index]
-            if chunk.id is not None:
+            if chunk.id is not None:  # 首个分片携带 id/name
                 slot["id"] = chunk.id
             if chunk.name is not None:
                 slot["name"] = chunk.name
-            slot["args"] += chunk.arguments_delta
+            slot["args"] += chunk.arguments_delta  # 参数只是字符串拼接，解析在执行前
         elif isinstance(chunk, BlockEnd):
-            pass
+            pass  # 槽位已足够自描述，无需额外收尾
         elif isinstance(chunk, Finish):
+            # 结束原因留给 outcome() 决定收尾策略
             self._finish_reason = chunk.reason
 
     @property
@@ -112,6 +120,7 @@ class BlockAssembler:
 
     def outcome(self) -> AssistantOutcome:
         blocks: list[TextBlock | ToolCallBlock] = []
+        # max_tokens 截断时参数不完整，工具调用不可安全执行 → 全部丢弃（对照 dsh assembler）
         drop_tool_calls = self._finish_reason == "max_tokens"
         for index in sorted(self._slots):
             slot = self._slots[index]
@@ -168,11 +177,12 @@ class MockProvider:
         self._script.append(response)
 
     async def stream(self, options: GenerateOptions) -> AsyncIterator[StreamChunk]:
+        # 脚本化演出：每次请求弹出一条预设响应；耗尽就报 SCRIPT_EXHAUSTED（测试可断言）。
         if not self._script:
             raise LlmError("SCRIPT_EXHAUSTED", "mock provider has no scripted response left")
         response = self._script.pop(0)
         for chunk in response.chunks:
-            await asyncio.sleep(0)  # 让出事件循环，模拟流式到达
+            await asyncio.sleep(0)  # 让出事件循环，模拟分片逐步到达
             yield chunk
 
 
@@ -186,6 +196,7 @@ class LlmService:
         self._providers: dict[str, LlmProvider] = {}
 
     def register(self, provider: LlmProvider) -> Disposer:
+        # 与 ToolRegistry 同一套模式：注册返回 disposer，由插件作用域负责撤销。
         if provider.name in self._providers:
             raise RuntimeError(f"llm provider already registered: {provider.name!r}")
         self._providers[provider.name] = provider

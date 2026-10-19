@@ -3,10 +3,6 @@
 启动时把 DB 里的存储源逐个变成"活的" service 实例，注册进 registry。
 之后整条请求链路只认 registry，不再查 storage_source 表。
 
-Java 的失败模式我们照抄：
-  - 单个存储源失败 → log.error 后**继续下一个**（局部失败容忍，一个配错的源不该让整站起不来）
-  - 全失败也照常启动 —— 代价是用户访问时才会撞上 50001（错误从启动期推迟到请求期）
-
 时间线提醒：本模块跑在**启动期**，没有 HTTP 请求 → get_current_user_base_path()
 走 ADMIN_ID 分支、_get_base_url() 返回 None，都是预期行为。
 """

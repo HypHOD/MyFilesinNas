@@ -1,0 +1,35 @@
+# VCS / editor
+.git
+.gitignore
+.vscode
+.DS_Store
+**/.DS_Store
+
+# Python
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+
+# Node
+**/node_modules
+MFN-vue/dist
+MFN-vue/.vite
+
+# 运行期数据与密钥
+.env
+.env.*
+!.env.example
+DemoFile/static
+DemoFile/demo-storage
+DemoFile/zfile.db
+DemoFile/zfile.db-*
+DemoFile/*.bak
+RSS/backend/src/config
+RSS/backend/src/data
+RSS/webui/dist
+RSS/docs
+**/*.log

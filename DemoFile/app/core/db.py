@@ -1,9 +1,10 @@
+import os
 from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-DATABASE_URL = "sqlite:///./zfile.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./zfile.db")
 
 engine = create_engine(
     DATABASE_URL,

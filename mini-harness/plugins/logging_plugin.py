@@ -28,9 +28,12 @@ class LoggingPlugin:
         self._lines: list[str] = []
 
     def apply(self, ctx: Context) -> None:
+        # 卸载消息的副作用最先注册，按 LIFO 会最后执行：
+        # 先由其他 disposer 摘掉监听器，再打印 unmounted。
         ctx.effect(lambda: print("[logging] unmounted"))
 
         def on_session_event(session: Any, event: SessionEvent) -> None:
+            # 纯观察：session 每次 append 都会广播到这里，不改任何行为。
             line = f"[logging] {event.type} #{event.seq}"
             self._lines.append(line)
             print(line)
@@ -38,6 +41,7 @@ class LoggingPlugin:
         ctx.on("session/event", on_session_event)
 
         async def observe_pre_step(agent: Any, messages: tuple, next: Any) -> Any:
+            # waterfall 里调 next() = 只观察不改写；直接返回 PreStepReject 就变成拦截器。
             print(f"[logging] pre-step claimed {len(messages)} message(s)")
             return await next()
 

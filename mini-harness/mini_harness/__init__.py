@@ -10,6 +10,17 @@
     tools      ToolRegistry + 三段执行流水线（pre / execute / post）
     agent      Agent 句柄 + Inbox + AgentRegistry（ctx.agents）
     agent_loop 默认驱动器：turn/step 状态机 + 拦截点 + 取消合成
+
+端到端阅读路标（数据怎么流过整个项目）：
+
+    examples/demo.py 装配插件并 followup
+      → Context.plugin/activate（container.py）按 inject 自动激活插件
+      → AgentRegistry.create（agent.py）建 Session、接 session/event、启动 loop
+      → AgentLoop._run（agent_loop.py）从 inbox 领取消息
+      → _run_turn / _run_step：pre-step → 请求模型 →（工具）→ 落日志 → turn/end
+      → llm.py 的 provider.stream + BlockAssembler 把分片折叠成 assistant 消息
+      → tools.run_tool_pipeline 执行工具，结果以 ToolResultMessage 落日志
+      → 下一步请求时 session.derive_messages() 从日志重建历史
 """
 
 from mini_harness.agent import (

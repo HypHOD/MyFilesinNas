@@ -7,6 +7,11 @@
 - 工具结果不是块，是独立 tool-role 的 ``ToolResultMessage``；
 - 流式分片是封闭联合：block_start / text_delta / tool_call_delta / block_end / finish，
   由 BlockAssembler（llm.py）折叠回完整消息。
+
+阅读提示：本文件只定义「词汇」，不产生行为。完整数据流：
+    llm.py 产生 StreamChunk → BlockAssembler 折叠成 Message / ToolCallBlock
+    → agent_loop.py 连同 ToolResultMessage 写入 session.py 日志
+    → session.derive_messages() 再投影成下一次请求的 ModelMessage 列表。
 """
 
 from __future__ import annotations
@@ -26,7 +31,8 @@ class TextBlock:
 class ToolCallBlock:
     id: str
     name: str
-    arguments: str  # 原始 JSON 字符串，不在此处解析
+    # 原始 JSON 字符串：流式到达时只是累加，执行前才由 tools.py 解析
+    arguments: str
 
 
 ContentBlock = TextBlock | ToolCallBlock
@@ -37,15 +43,17 @@ ContentBlock = TextBlock | ToolCallBlock
 
 @dataclass(frozen=True)
 class Message:
+    # 只有 system / user / assistant 三种角色；工具结果用下面的 ToolResultMessage
     role: Literal["system", "user", "assistant"]
     content: tuple[ContentBlock, ...]
 
 
 @dataclass(frozen=True)
 class ToolResultMessage:
+    # 工具结果不是内容块，而是独立的消息类型；tool_call_id 让模型把结果和调用配对。
     tool_call_id: str
     content: str
-    is_error: bool = False
+    is_error: bool = False  # 失败也只是 Error 文本，不会中断轮次
 
 
 ModelMessage = Message | ToolResultMessage
@@ -65,7 +73,9 @@ def tool_calls_of(message: Message) -> tuple[ToolCallBlock, ...]:
 
 
 # -- 流式分片 -------------------------------------------------------------
-
+# 一条流式响应的生命周期（BlockAssembler 按 index 槽位折叠）：
+#   BlockStart(index, type) → TextDelta* 或 ToolCallDelta* → BlockEnd(index)
+#   ……多个 index 可以交错到达…… → Finish(reason) 结束整条响应
 FinishReason = Literal["stop", "tool_calls", "max_tokens", "aborted", "error"]
 
 
@@ -96,6 +106,7 @@ class BlockEnd:
 
 @dataclass(frozen=True)
 class Finish:
+    # 结束原因决定收尾策略：normal stop / 还要调工具 / 截断 / 中止 / 错误
     reason: FinishReason
 
 

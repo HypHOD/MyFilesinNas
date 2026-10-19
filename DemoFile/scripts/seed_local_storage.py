@@ -7,8 +7,12 @@
 
 为什么是脚本不是接口：创建存储源的正规入口是 /admin/storage 那套后台接口，
 实现完整后台是独立工程。脚本直接插 DB，效果等价。可以重复执行（幂等）。
+
+容器/生产部署通过 MFN_STORAGE_PATH 指定存储目录（例如 /media），
+此时不会生成演示文件，只确保游客白名单目录存在。
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -21,8 +25,11 @@ from app.models.storage import StorageSource, StorageSourceConfig, UserStorageSo
 from app.storage.enums import FileOperatorType
 from app.models.user import ADMIN_ID,ANONYMOUS_ID
 
-# 演示用的真实目录。storage_source_config.filePath 必须指向它（绝对路径）。
-DEMO_DIR = Path(__file__).resolve().parent.parent / "demo-storage"
+# storage_source_config.filePath 必须指向真实绝对路径。
+# 本地开发默认 demo-storage；容器部署用 MFN_STORAGE_PATH=/media 指向挂载点。
+_DEFAULT_DEMO_DIR = Path(__file__).resolve().parent.parent / "demo-storage"
+DEMO_DIR = Path(os.environ.get("MFN_STORAGE_PATH", str(_DEFAULT_DEMO_DIR)))
+_PRODUCTION_STORAGE = "MFN_STORAGE_PATH" in os.environ
 
 STORAGE_KEY = "local"
 
@@ -46,8 +53,13 @@ GUEST_ROOT_PATH = "/Bangumi"
 
 
 def ensure_demo_dir() -> None:
-    """建 DEMO_DIR 和几个演示文件（已存在就跳过）。"""
+    """准备存储目录。MFN_STORAGE_PATH 模式只建目录，不生成演示文件。"""
     DEMO_DIR.mkdir(parents=True, exist_ok=True)
+
+    if _PRODUCTION_STORAGE:
+        (DEMO_DIR / GUEST_ROOT_PATH.lstrip("/")).mkdir(parents=True, exist_ok=True)
+        return
+
     samples = {
         "说明.txt": "这是本地存储的演示目录，由 scripts/seed_local_storage.py 创建。\n",
         "文档/中文名文件.txt": "用来验证 URL 编码和中文显示。\n",

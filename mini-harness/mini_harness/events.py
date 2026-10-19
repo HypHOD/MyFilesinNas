@@ -10,6 +10,13 @@
 
 与 dsh 的差异：dsh 的 emit 是同步广播；mini 允许监听器是协程，协程会被调度为
 后台任务，``drain()`` 用于等待它们完成（让测试与演示保持确定性）。
+
+阅读提示：谁在监听？``tools.py`` 发 tools/* 三段流水线事件；``agent_loop.py``
+发 agent/* 拦截点事件；``plugins/logging_plugin.py`` 观察、``guard_plugin.py``
+拦截。三种模式对应三类用途：
+    emit      → 只看不改（日志、通知）
+    waterfall → 拦截 / 改写 / 短路（守卫、重试决策）
+    serial    → 终结检查点，收集所有意见（turn-stopping）
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ class Emitter:
 
     def register(self, name: str, listener: Listener) -> Disposer:
         """注册监听器，返回撤销注册的 disposer。"""
+        # 同一事件按注册顺序调用；撤销时只摘自己，不影响其他监听器。
         self._listeners.setdefault(name, []).append(listener)
 
         def dispose() -> None:
@@ -43,15 +51,18 @@ class Emitter:
 
     def emit(self, name: str, *args: Any) -> None:
         """广播：依次调用监听器；协程返回值的监听器被调度为后台任务。"""
+        # 观察者模式：调用方不等待结果，也管不了别人干什么（拦截请用 waterfall）。
         for listener in list(self._listeners.get(name, ())):
             result = listener(*args)
             if inspect.isawaitable(result):
+                # 异步监听器不阻塞当前调用方；drain() 负责收尾并把异常重新抛出。
                 task = asyncio.get_running_loop().create_task(result)
                 self._pending.add(task)
                 task.add_done_callback(self._pending.discard)
 
     async def drain(self) -> None:
         """等待所有由 emit 调度的异步监听器完成；监听器抛错会在此处重新抛出。"""
+        # 循环而不是 gather 一次就结束：监听器执行期间可能又 emit 出新的后台任务。
         while self._pending:
             results = await asyncio.gather(*list(self._pending), return_exceptions=True)
             for result in results:
@@ -60,6 +71,7 @@ class Emitter:
 
     async def serial(self, name: str, *args: Any) -> list[Any]:
         """按注册序依次 await，返回每个监听器的返回值列表。"""
+        # 终结检查点：所有监听器都要表态，调用方拿到完整结果列表（如 turn-stopping）。
         results: list[Any] = []
         for listener in list(self._listeners.get(name, ())):
             result = listener(*args)
@@ -70,10 +82,14 @@ class Emitter:
 
     async def waterfall(self, name: str, *args: Any, default: Listener | None = None) -> Any:
         """链式委托分发：见模块 docstring 的语义说明。链尾调用 ``default(*args)``。"""
+        # 瀑布链 = 递归的洋葱模型：listener(*inner, next_) 调了 next_ 才进入下一层；
+        # 不调 next_ 直接 return 就是短路——后续监听器和 default 都不会执行。
+        # 例：guard_plugin 命中路径穿越时直接 return PreToolDeny，工具执行被整段跳过。
         listeners = list(self._listeners.get(name, ()))
 
         async def call(index: int, *inner: Any) -> Any:
             if index >= len(listeners):
+                # 链尾：落到默认实现（如真正执行工具、默认放行、默认拒绝）。
                 if default is None:
                     return None
                 result = default(*inner)

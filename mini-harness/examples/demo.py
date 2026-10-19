@@ -29,6 +29,7 @@ from plugins.logging_plugin import LoggingPlugin
 
 
 def dump_projection(session: Session) -> None:
+    # 演示「模型可见即已记录」：这里打印的正是下一次请求会带上的历史。
     print("\n-- derive_messages()（本次会话的模型历史投影） --")
     for message in derive_messages(session):
         if isinstance(message, ToolResultMessage):
@@ -54,29 +55,36 @@ async def main() -> None:
     workspace = Path(tempfile.mkdtemp(prefix="mini-harness-demo-"))
     (workspace / "hello.txt").write_text("Hello, mini-harness!", encoding="utf-8")
 
+    # 两幕各需要两次模型请求：先要求调工具，再根据工具结果收尾。
+    # 脚本按这个顺序排好，MockProvider 每收到一次请求就弹出一条。
     provider = MockProvider(
         script=[
+            # 幕一：模型要求读文件 → 拿到结果后总结
             tool_call_response(("read_file", {"path": "hello.txt"})),
             text_response("我读到了：文件内容是 'Hello, mini-harness!'。"),
+            # 幕二：模型要求读目录外文件 → 被 guard 拒绝后换说法
             tool_call_response(("read_file", {"path": "../secret.txt"})),
             text_response("读取被 guard 拒绝了，我换一个允许范围内的路径再试。"),
         ]
     )
 
     ctx = Context()
-    ctx.plugin(LlmPlugin([provider]))
-    ctx.plugin(demo_tools_plugin(workspace))  # 提供 ctx.tools（read_file + echo）
-    ctx.plugin(GuardPlugin())  # 拦截 read_file 的路径穿越
-    ctx.plugin(LoggingPlugin())  # 打印每条会话事件
-    ctx.plugin(AgentsPlugin())  # 提供 ctx.agents
-    ctx.plugin(AgentLoopPlugin())  # 提供默认驱动器
-    await ctx.ready()
+    # 挂载顺序无关紧要：AgentLoopPlugin 声明 inject=("agents","tools","llm")，
+    # 依赖齐了才会被容器激活（见 container._activate_parked）。
+    ctx.plugin(LlmPlugin([provider]))          # 提供 ctx.llm
+    ctx.plugin(demo_tools_plugin(workspace))   # 提供 ctx.tools（read_file + echo）
+    ctx.plugin(GuardPlugin())                  # 拦截 read_file 的路径穿越
+    ctx.plugin(LoggingPlugin())                # 打印每条会话事件
+    ctx.plugin(AgentsPlugin())                 # 提供 ctx.agents
+    ctx.plugin(AgentLoopPlugin())              # 提供默认驱动器
+    await ctx.ready()                          # 等所有（依赖已齐的）插件激活完成
 
     agent = ctx.agents.create(system_prompt="你是演示用助手，需要文件内容时调用 read_file。")
     try:
         print("=" * 72)
         print("幕一：正常工具轮次 —— 用户请模型读 hello.txt")
         print("=" * 72)
+        # followup 入 inbox.next_turn 并唤醒 loop；when_idle 等这一轮彻底跑完。
         agent.followup("读一下 hello.txt")
         await agent.when_idle()
         dump_projection(agent.session)
@@ -92,6 +100,7 @@ async def main() -> None:
         print("  " + ", ".join(event.type for event in agent.session.events))
     finally:
         print("\n-- 卸载容器（logging 插件展示 LIFO 卸载顺序） --")
+        # 递归卸载所有插件作用域：停 loop task、摘监听器、注销服务/工具，最后打印 unmounted。
         await ctx.dispose()
         shutil.rmtree(workspace, ignore_errors=True)
     print("done.")

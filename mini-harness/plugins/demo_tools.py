@@ -18,11 +18,14 @@ def _read_file(allowed_dir: Path) -> ToolDefinition:
     root = allowed_dir.resolve()
 
     def execute(args: dict) -> str:
+        # 工具侧安全边界：先 resolve 成规范路径（消掉 .. / 符号链接），再校验仍在根目录内。
+        # 这是 guard_plugin 之外的第二道防线（那里拦模型参数，这里拦实际文件访问）。
         requested = (root / str(args.get("path", ""))).resolve()
         if not requested.is_relative_to(root):
             raise ValueError(f"path escapes allowed dir: {args.get('path')!r}")
         return requested.read_text(encoding="utf-8")
 
+    # parameters 是发给模型的 JSON Schema；execute 永远不会出现在 schema 里。
     return ToolDefinition(
         name="read_file",
         description="Read a text file relative to the demo directory.",
@@ -55,4 +58,5 @@ def _echo() -> ToolDefinition:
 
 def demo_tools_plugin(allowed_dir: Path | str) -> ToolsPlugin:
     """返回预装 read_file/echo 的 ToolsPlugin。"""
+    # 挂载后由 ToolsPlugin.apply() 提供 ctx.tools；AgentLoopPlugin 依赖它才会激活。
     return ToolsPlugin([_read_file(Path(allowed_dir)), _echo()])

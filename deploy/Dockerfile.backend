@@ -1,0 +1,20 @@
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY mini-harness /app/mini-harness
+COPY DemoFile/requirements.txt /app/DemoFile/requirements.txt
+
+WORKDIR /app/DemoFile
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install -r requirements.txt
+
+COPY DemoFile /app/DemoFile
+
+EXPOSE 8080
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

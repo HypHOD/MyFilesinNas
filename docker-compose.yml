@@ -1,0 +1,128 @@
+name: mfn
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    image: mfn-backend:local
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      DATABASE_URL: sqlite:////data/zfile.db
+      MFN_STORAGE_PATH: /media
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+    volumes:
+      - type: bind
+        source: ${M2_ROOT:-/mnt/m2}/appdata/demo
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${M2_ROOT:-/mnt/m2}/media
+        target: /media
+        bind:
+          create_host_path: false
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/openapi.json', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rss:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.rss
+    image: mfn-rss:local
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      HOST: 0.0.0.0
+    volumes:
+      - type: bind
+        source: ${M2_ROOT:-/mnt/m2}/appdata/rss/config
+        target: /app/src/config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${M2_ROOT:-/mnt/m2}/appdata/rss/data
+        target: /app/src/data
+        bind:
+          create_host_path: false
+    expose:
+      - "7892"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7892/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      qbittorrent:
+        condition: service_started
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Asia/Shanghai}
+      WEBUI_PORT: "8080"
+    volumes:
+      - type: bind
+        source: ${M2_ROOT:-/mnt/m2}/appdata/qbittorrent
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${M2_ROOT:-/mnt/m2}/media/Bangumi
+        target: /downloads
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${M2_ROOT:-/mnt/m2}/downloads
+        target: /downloads-tmp
+        bind:
+          create_host_path: false
+    ports:
+      - "${QB_BIND:-127.0.0.1}:${QB_HOST_PORT:-8081}:8080"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+    image: mfn-frontend:local
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      rss:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
