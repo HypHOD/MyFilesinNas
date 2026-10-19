@@ -1,14 +1,13 @@
 """示例插件：生命周期日志。
 
-展示两种观察方式：
+两种观察方式：
 
-- **emit 观察**：监听 ``session/event``，任何进入会话日志的事件都被打印
+- emit 观察：监听 ``session/event``，打印任何进入会话日志的事件
   （turn/step 边界、消息、工具调用与结果）；
-- **waterfall 透传**：监听 ``agent/pre-step`` 但调用 ``next()`` 委托下游——
-  只观察不改写；若直接返回 PreStepReject 就变成拦截器（对照 guard_plugin）。
+- waterfall 透传：监听 ``agent/pre-step`` 并调用 ``next()`` 委托下游，只观察
+  不改写；直接返回 PreStepReject 则变为拦截器（对照 guard_plugin）。
 
-卸载顺序演示：unload 消息的副作用**最先注册**，因此按 LIFO **最后执行**——
-先摘监听器，再打印卸载完成。
+unload 消息的副作用最先注册，按 LIFO 最后执行：先摘监听器，再打印卸载完成。
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ class LoggingPlugin:
         ctx.on("session/event", on_session_event)
 
         async def observe_pre_step(agent: Any, messages: tuple, next: Any) -> Any:
-            # waterfall 里调 next() = 只观察不改写；直接返回 PreStepReject 就变成拦截器。
+            # 调用 next() 表示只观察不改写；直接返回 PreStepReject 则变为拦截器。
             print(f"[logging] pre-step claimed {len(messages)} message(s)")
             return await next()
 

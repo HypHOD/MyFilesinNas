@@ -1,9 +1,8 @@
-"""一存储源一实例的注册中心。对应 Java 的 StorageSourceContext（去掉 Spring 反射那半）。
+"""一存储源一实例的注册中心，对应 Java 的 StorageSourceContext。
 
-Java 用 @Scope(PROTOTYPE) + 两个静态 Map 实现"每个存储源一个 service 对象"，
-Python 直接 dict 就够 —— 没有框架魔法，也不需要 ConcurrentHashMap。
-
-步骤 5 的 loader 负责往里注册；步骤 6 的路由按 storage_id / storage_key 取。
+Java 通过 @Scope(PROTOTYPE) 和两个静态 Map 保证每个存储源一个 service 对象；
+这里用 dict 保存同样的映射。loader 在启动时注册，路由按 storage_id 或
+storage_key 取用。
 """
 from typing import Any
 
@@ -17,11 +16,10 @@ _key_to_id: dict[str, int] = {}
 
 
 def register(storage_key: str, service: AbstractBaseFileService) -> None:
-    """注册（对应 Java StorageSourceContext.init 的最后两行 Map.put）。
+    """对应 Java StorageSourceContext.init 末尾的两次 Map.put。
 
-    TODO 写实现（两个 dict 都要写；注意 service.storage_id 可能为 None，先断言掉）
+    service 必须先 init()，否则 storage_id 为空。
     """
-    # raise NotImplementedError
     if service.storage_id is None:
         raise ValueError("注册前必须先init()")
     _services[service.storage_id] = service
@@ -29,13 +27,10 @@ def register(storage_key: str, service: AbstractBaseFileService) -> None:
 
 
 def get_by_storage_id(storage_id: int) -> AbstractBaseFileService:
-    """按 id 取。取不到**抛异常**：BizException(ErrorCode.INVALID_STORAGE_SOURCE)
+    """按 id 取服务，取不到抛 BizException(INVALID_STORAGE_SOURCE)（50001）。
 
-    对应 Java getByStorageId → InvalidStorageSourceBizException（50001）。
-
-    TODO 写实现
+    对应 Java getByStorageId → InvalidStorageSourceBizException。
     """
-    # raise NotImplementedError
     service = _services.get(storage_id)
     if service is None:
         raise BizException(ErrorCode.INVALID_STORAGE_SOURCE)
@@ -43,14 +38,11 @@ def get_by_storage_id(storage_id: int) -> AbstractBaseFileService:
 
 
 def get_by_storage_key(storage_key: str) -> AbstractBaseFileService | None:
-    """按 key 取。取不到返回 **None**，不是错误。
+    """按 key 取服务，取不到返回 None。
 
-    对应 Java getByStorageKey —— 它的调用方（步骤 11 的 SPA 回退路由）拿它判断
-    "URL 第一段到底是不是存储源 key"，不匹配是正常分支，所以**别在这里抛异常**。
-
-    TODO 写实现
+    对应 Java getByStorageKey。调用方（SPA 回退路由）用它判断 URL 第一段是否为
+    存储源 key，不匹配是正常分支，因此这里不抛异常。
     """
-    # raise NotImplementedError
     storage_id = _key_to_id.get(storage_key)
     if storage_id is None:
         return None
@@ -58,11 +50,10 @@ def get_by_storage_key(storage_key: str) -> AbstractBaseFileService | None:
 
 
 def destroy(storage_id: int) -> None:
-    """移除注册项并调 service.destroy()。对应 Java StorageSourceContext.destroy（312-322 行）。
+    """移除注册项并调用 service.destroy()，对应 Java StorageSourceContext.destroy。
 
-    TODO 写实现（Java 是先从 map 里 remove，拿到的对象非空才调 destroy）
+    Java 先从 map 中 remove，拿到对象后才调用 destroy，这里保持一致。
     """
-    # raise NotImplementedError
     service = _services.pop(storage_id, None)
     if service is None:
         return
@@ -72,9 +63,5 @@ def destroy(storage_id: int) -> None:
 
 
 def all_services() -> dict[int, AbstractBaseFileService]:
-    """返回当前注册表的浅拷贝（启动日志、测试断言用）。
-
-    TODO 写实现（返回拷贝，别把内部 dict 漏出去）
-    """
-    # raise NotImplementedError
+    """返回注册表的浅拷贝，供启动日志和测试断言使用。"""
     return dict(_services)

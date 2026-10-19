@@ -33,9 +33,9 @@ _PRODUCTION_STORAGE = "MFN_STORAGE_PATH" in os.environ
 
 STORAGE_KEY = "local"
 
-# 授权行必须显式插 —— 否则匿名访问首页什么都看不到。
-# （Java 是"新建存储源时按各用户 default_permissions 自动生成授权行"
-#   addDefaultPermissionsForAllUsersInStorageSource，我们没实现那套。）
+# 授权行必须显式插入，否则匿名访问首页看不到任何存储源。
+# Java 在新建存储源时会按各用户 default_permissions 自动生成授权行
+# （addDefaultPermissionsForAllUsersInStorageSource），这里未实现该逻辑。
 
 # 全量权限串：19 个操作 value 用逗号连接。管理员（id=1）用。
 FULL_PERMISSIONS = ",".join(op.value for op in FileOperatorType)
@@ -73,30 +73,15 @@ def ensure_demo_dir() -> None:
 
 
 def main() -> None:
-    """用途：这个脚本的执行主体 —— 幂等三步：建演示目录 → 保证存储源 + filePath 配置存在 →
-    保证 admin/guest 两条授权行存在。跑完接上后端就能验收 /api/storage/list。
+    """脚本入口：幂等准备本地存储的演示数据。
 
-    三步，全程幂等（存在即跳过）：
+    依次确保演示目录存在、key='local' 的存储源及其 filePath /
+    proxyLinkForceDownload 配置存在、admin 与 guest 两条授权行存在。全部按唯一键
+    查重，重复执行不会产生重复数据。
 
-      ① ensure_demo_dir()
-      ② storage_source：按 key='local' 查，没有才插。字段值：
-           enable=True, name="本地存储", key=STORAGE_KEY, type="local",
-           search_enable=True, order_num=0, default_switch_to_img_mode=False,
-           enable_cache=False, auto_refresh_cache=False, compatibility_readme=False
-      ③ storage_source_config：两行 —— filePath=str(DEMO_DIR) 和
-           proxyLinkForceDownload="false"（在线播放必需，理由见下方参数行的注释）；
-           其余参数（proxyPrivate / proxyTokenTime / domain）靠 Pydantic 默认值兜底。
-         （按 (storage_id, name) 查重。）
-      ④ user_storage_source：user_id 分别 1(管理员) 和 2(guest)，enable=True；
-           管理员 root_path="/" + FULL_PERMISSIONS（全量），
-           游客 root_path=GUEST_ROOT_PATH（公开白名单 /Bangumi）+ READONLY_PERMISSIONS（只读）
-         （按 (user_id, storage_source_id) 查重。）
-
-      最后 print 出存储源 id 和 demo 目录路径。
-
-    TODO 写实现
+    admin 使用 root_path="/" 与全量权限；guest 使用 GUEST_ROOT_PATH（公开白名单
+    /Bangumi）与只读权限。执行完成会打印存储源 id 和演示目录路径。
     """
-    # return
     ensure_demo_dir()
     with SessionLocal() as db:
         storage_source = db.scalar(select(StorageSource).where(StorageSource.key == STORAGE_KEY))

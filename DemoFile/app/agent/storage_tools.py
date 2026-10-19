@@ -2,7 +2,7 @@
 
 - 路径入参与 service 层「相对入参族」一致：**相对用户根**（"/"、"/Bangumi"），
   用户身份来自 app.core.context 的 contextvar。宿主必须在**创建 agent 之前**
-  set_current_user_id()（CLI = 管理员；Phase A = 登录用户）——agent loop 是
+  set_current_user_id()（CLI = 管理员；HTTP 宿主 = 登录用户）——agent loop 是
   创建时 create_task 起的常驻任务，contextvar 随创建时刻快照进任务。
 - 读工具标记 is_concurrency_safe → agent_loop 里连续读调用可并行；
   写工具（new_folder / rename）保持默认独占屏障。

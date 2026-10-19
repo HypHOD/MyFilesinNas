@@ -1,17 +1,16 @@
 """消息词汇与流式分片。
 
-直译自 dsh ``packages/llm/llm`` 的消息/流式词汇（docs/subsystems/llm-streaming.zh.md）：
+实现对齐 dsh ``packages/llm/llm`` 的消息/流式词汇（docs/subsystems/llm-streaming.zh.md）：
 
 - 消息 = ``{role, content: ContentBlock[]}``，块 = text | tool_call；
-- 工具调用参数全程保持**原始 JSON 字符串**，由执行方解析；
+- 工具调用参数全程保持原始 JSON 字符串，由执行方解析；
 - 工具结果不是块，是独立 tool-role 的 ``ToolResultMessage``；
 - 流式分片是封闭联合：block_start / text_delta / tool_call_delta / block_end / finish，
   由 BlockAssembler（llm.py）折叠回完整消息。
 
-阅读提示：本文件只定义「词汇」，不产生行为。完整数据流：
-    llm.py 产生 StreamChunk → BlockAssembler 折叠成 Message / ToolCallBlock
-    → agent_loop.py 连同 ToolResultMessage 写入 session.py 日志
-    → session.derive_messages() 再投影成下一次请求的 ModelMessage 列表。
+数据流：llm.py 产生 StreamChunk → BlockAssembler 折叠成 Message / ToolCallBlock
+→ agent_loop.py 连同 ToolResultMessage 写入 session.py 日志 → derive_messages()
+投影成下一次请求的 ModelMessage 列表。
 """
 
 from __future__ import annotations
@@ -43,7 +42,7 @@ ContentBlock = TextBlock | ToolCallBlock
 
 @dataclass(frozen=True)
 class Message:
-    # 只有 system / user / assistant 三种角色；工具结果用下面的 ToolResultMessage
+    # 只有 system / user / assistant 三种角色；工具结果使用独立的 ToolResultMessage。
     role: Literal["system", "user", "assistant"]
     content: tuple[ContentBlock, ...]
 

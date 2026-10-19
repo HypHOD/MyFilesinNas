@@ -1,14 +1,14 @@
 """装配与宿主：mini-harness 容器 + DeepSeek 提供方 + 存储工具 + 会话管理。
 
 两层：
-  build_context(provider) —— 组装容器（对应 examples/demo.py 的组装段），CLI 与
+  build_context(provider)：组装容器（与 examples/demo.py 的组装段对应），CLI 与
       后端共用；
-  AgentHost —— 常驻宿主的生命周期与对外控制面：lifespan 启停、按登录用户建/查/
-      销 agent、SSE 事件流的唤醒与重放。HTTP 层（app/modules/agent）只碰它。
+  AgentHost：常驻宿主的生命周期与对外控制面 —— lifespan 启停、按登录用户建/查/
+      销 agent、SSE 事件流的唤醒与重放。HTTP 层（app/modules/agent）只依赖它。
 
-用户身份（关键约束）：agent loop 是创建时刻 create_task 起的常驻任务，contextvar
-随创建快照进任务 —— 会话在哪个用户的请求里创建，工具就以哪个用户（其存储根 /
-授权）执行。create() 里再显式 set 一次，让该不变量不依赖上层调用点是否正确。
+用户身份：agent loop 是创建时刻 create_task 起的常驻任务，contextvar 随创建快照
+进入任务 —— 会话在哪个用户的请求中创建，工具就以哪个用户（及其存储根/授权）执行。
+create() 中显式 set 一次，使该不变量不依赖上层调用点。
 """
 
 from __future__ import annotations
@@ -64,12 +64,12 @@ class _OwnedAgent:
 
 
 class AgentHost:
-    """常驻宿主：后端嵌入形态（Phase A）的会话管理入口。
+    """常驻宿主：后端嵌入形态的会话管理入口。
 
-    - start()/stop() 由 main.py 的 lifespan 调用；缺 DEEPSEEK_API_KEY 时 start()
-      记为未启用（endpoints 返回明确错误），不拖垮站点启动。
-    - 会话是纯内存的（mini-harness Session 无持久化）——重启后全部消失，
-      前端表现为"要重新建会话"，属预期。
+    - start()/stop() 由 main.py 的 lifespan 调用；缺少 DEEPSEEK_API_KEY 时
+      start() 记为未启用（endpoints 返回明确错误），不影响站点启动。
+    - 会话是纯内存的（mini-harness Session 无持久化），重启后全部丢失，
+      前端需要重新创建会话，属预期。
     """
 
     def __init__(self) -> None:
@@ -109,7 +109,7 @@ class AgentHost:
         """建会话。必须在运行中的事件循环里调用（driver 要 create_task）。
 
         显式 set_current_user_id：loop task 的快照身份以本参数为准，而非调用点的
-        请求上下文 —— 这是"工具以会话属主身份执行"的唯一保证点。
+        请求上下文，这是工具以会话属主身份执行的唯一保证点。
         """
         ctx = self._require_ctx()
         app_context.set_current_user_id(user_id)
@@ -167,7 +167,7 @@ class AgentHost:
                 index += 1
             entry.tick.clear()
             if index < len(agent.session.events):
-                continue  # clear 前新事件已落地 → 立刻再排空，避免丢唤醒
+                continue  # clear 前已有新事件落地，立即再次排空，避免丢失唤醒。
             try:
                 await asyncio.wait_for(entry.tick.wait(), timeout=SSE_PING_SECONDS)
             except asyncio.TimeoutError:

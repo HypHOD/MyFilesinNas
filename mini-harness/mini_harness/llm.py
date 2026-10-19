@@ -1,20 +1,19 @@
-"""LLM seam：提供方协议、流式分片折叠器与脚本化 Mock 提供方。
+"""LLM 接缝：提供方协议、流式分片折叠器与脚本化 Mock 提供方。
 
-直译自 dsh ``packages/llm/llm``（docs/subsystems/llm-streaming.zh.md）：
+实现对齐 dsh ``packages/llm/llm``（docs/subsystems/llm-streaming.zh.md）：
 
 - 提供方最小形状：``stream(options) -> AsyncIterator[StreamChunk]``；
-- 一次调用 = 一次提供方尝试，**库内不重试**（重试走 ``agent/request-error`` 事件）；
+- 一次调用 = 一次提供方尝试，库内不重试（重试走 ``agent/request-error`` 事件）；
 - 失败抛 ``LlmError(code)``，code 用于消费方路由；
 - BlockAssembler 把分片折叠回完整 assistant 消息
   （对照 ``packages/llm/llm/src/assembler.ts``）。
 
-与 dsh 的差异：多适配器路由简化为按 name 查找；砍掉 usage 计量、推理/图片块、
+未实现：多适配器路由（简化为按 name 查找）、usage 计量、推理/图片块、
 prepareCall、llm-retry 服务；保留 ``max_tokens`` 截断时丢弃工具调用的规则。
 
-阅读提示：``agent_loop._generate()`` 的一次请求 = 本文件的
-``provider.stream()`` + ``BlockAssembler`` 折叠。重试不在这里——``LlmError``
-抛给 ``agent/request-error`` 事件决定。MockProvider 让 demo/测试无需网络，
-按脚本逐条吐出分片。
+``agent_loop._generate()`` 的一次请求 = ``provider.stream()`` + ``BlockAssembler``
+折叠；重试不在本文件，``LlmError`` 抛给 ``agent/request-error`` 决定。MockProvider
+供 demo/测试离线使用，按脚本逐条吐出分片。
 """
 
 from __future__ import annotations
@@ -177,7 +176,7 @@ class MockProvider:
         self._script.append(response)
 
     async def stream(self, options: GenerateOptions) -> AsyncIterator[StreamChunk]:
-        # 脚本化演出：每次请求弹出一条预设响应；耗尽就报 SCRIPT_EXHAUSTED（测试可断言）。
+        # 每次请求弹出一条预设响应；耗尽时抛 SCRIPT_EXHAUSTED，测试可断言。
         if not self._script:
             raise LlmError("SCRIPT_EXHAUSTED", "mock provider has no scripted response left")
         response = self._script.pop(0)

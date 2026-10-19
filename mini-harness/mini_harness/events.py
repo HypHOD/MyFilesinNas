@@ -1,20 +1,18 @@
 """事件总线：emit / waterfall / serial 三种分发模式。
 
-直译自 dsh（DeepSeek Harness）``vendor/cordis/src/events.ts`` 的三模式语义：
+实现对齐 dsh（DeepSeek Harness）``vendor/cordis/src/events.ts`` 的三模式语义：
 
 - ``emit``      观察式广播：不等待结果、不改变数据流。
 - ``waterfall`` 环绕中间件：监听器签名 ``(*args, next)``，调用 ``await next()``
-                委托下游并拿到其返回值；不调用 ``next()`` 直接返回 = 短路整条链，
-                这是拦截决策事件（拒批、改写、重试）的设计意图。
+                委托下游并拿到其返回值；不调用 ``next()`` 直接返回则短路整条链，
+                用于拦截决策（拒批、改写、重试）。
 - ``serial``    按注册序依次 await，收集每个监听器的返回值；用于终结检查点。
 
-与 dsh 的差异：dsh 的 emit 是同步广播；mini 允许监听器是协程，协程会被调度为
-后台任务，``drain()`` 用于等待它们完成（让测试与演示保持确定性）。
+与 dsh 的差异：dsh 的 emit 是同步广播；这里允许监听器是协程，协程被调度为
+后台任务，``drain()`` 用于等待它们完成，保证测试与演示的确定性。
 
-阅读提示：谁在监听？``tools.py`` 发 tools/* 三段流水线事件；``agent_loop.py``
-发 agent/* 拦截点事件；``plugins/logging_plugin.py`` 观察、``guard_plugin.py``
-拦截。三种模式对应三类用途：
-    emit      → 只看不改（日志、通知）
+三种模式对应的用途：
+    emit      → 只观察（日志、通知）
     waterfall → 拦截 / 改写 / 短路（守卫、重试决策）
     serial    → 终结检查点，收集所有意见（turn-stopping）
 """

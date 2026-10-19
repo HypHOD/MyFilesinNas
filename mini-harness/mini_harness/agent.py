@@ -1,6 +1,6 @@
 """Agent 句柄与 inbox：对外控制面与驱动器装配。
 
-直译自 dsh ``packages/core/agent``（docs/subsystems/agent-lifecycle.zh.md、
+实现对齐 dsh ``packages/core/agent``（docs/subsystems/agent-lifecycle.zh.md、
 ``packages/core/agent/src/runtime-types.ts``）：
 
 - ``Agent`` 是对外句柄：``followup``（排入下一轮）／``steer``（排入下一步并唤醒）／
@@ -10,12 +10,7 @@
 - ``ctx.agents`` 注册表负责装配：建 Session、把每次 append 广播到
   ``session/event``、调用 driver 启动常驻 loop task；容器卸载时停掉全部 agent。
 
-与 dsh 的差异：砍掉 scope/initiator、subagent、恢复与细粒度 AgentStatus。
-
-阅读提示：本文件是「控制面」，agent_loop.py 是「数据面」。Agent 句柄只负责
-往 inbox 里放消息；AgentLoop 是 inbox 的唯一消费者。AgentRegistry.create()
-是关键装配点：建 Session → 把 append 广播接到 ctx.emit("session/event")
-→ 启动常驻 loop task。cancel() 只中止当前工作，不会杀死 loop。
+未实现：scope/initiator、subagent、恢复与细粒度 AgentStatus。
 """
 
 from __future__ import annotations
@@ -83,7 +78,7 @@ class Inbox:
 
     def claim_for_step(self) -> list[InboxMessage]:
         """步边界领取：只取 next_step（next_turn 留给下一轮）。"""
-        # 这就是 followup 与 steer 的核心区别：steer 能在当前 turn 的下一步插队。
+        # followup 与 steer 的区别：steer 能在当前 turn 的下一步插队。
         claimed = list(self.next_step)
         self.next_step.clear()
         return claimed
@@ -128,25 +123,25 @@ class Agent:
 
     def followup(self, content: str, *, source: str = "user") -> InboxMessage:
         """排入下一轮并唤醒 loop。"""
-        # 语义：等当前 turn 彻底结束后，下一轮才处理（排队新任务）。
+        # 当前 turn 彻底结束后，下一轮才处理（排队新任务）。
         message = self._enqueue(content, source, step=False)
         return message
 
     def steer(self, content: str, *, source: str = "steer") -> InboxMessage:
         """排入下一步并唤醒 loop；loop 空闲时该消息开启新轮次。"""
-        # 语义：打断式插队——当前 step 结束后立刻进入下一 step 处理它。
+        # 打断式插队：当前 step 结束后立即进入下一 step 处理。
         return self._enqueue(content, source, step=True)
 
     def inject(self, content: str, *, source: str = "inject") -> InboxMessage:
         """排入下一步但不唤醒；由下一次唤醒顺带领取。"""
-        # 语义：静默注入上下文，不主动把 loop 从睡眠中叫醒。
+        # 静默注入上下文，不主动唤醒 loop。
         message = self._enqueue(content, source, step=True, wake=False)
         return message
 
     def cancel(self, *, keep_inbox: bool = False) -> None:
         """中止当前工作（loop 不终止）；默认清空 inbox。"""
-        # 实现是 cancel 掉 loop task：agent_loop._run() 捕获 CancelledError 后
-        # 做日志收口并继续 while 循环，所以 loop 本身不会退出。
+        # cancel 掉 loop task；_run() 捕获 CancelledError 后做日志收口并继续循环，
+        # loop 本身不会退出。
         task = self._task
         if task is None or task.done():
             if not keep_inbox:
@@ -235,9 +230,8 @@ class AgentRegistry:
         aid = agent_id or f"agent-{self._counter}"
         if aid in self._agents:
             raise RuntimeError(f"agent already exists: {aid!r}")
-        # 1) 每个 agent 一份仅追加的 Session 日志
+        # 每个 agent 一份仅追加的 Session 日志；每次 append 广播为全局 session/event。
         session = Session(id=aid)
-        # 2) 把日志的每次 append 广播成全局 session/event（logging 等观察者监听）
         session.set_notify(lambda s, event: self._ctx.emit("session/event", s, event))
         agent = Agent(
             aid,
@@ -247,7 +241,7 @@ class AgentRegistry:
             system_prompt=system_prompt,
         )
         self._agents[aid] = agent
-        # 3) 启动常驻 loop task：它独占消费 agent.inbox，直到 dispose/closed
+        # 启动常驻 loop task：独占消费 agent.inbox，直到 dispose/closed。
         agent._task = self._driver.start(agent)
         return agent
 

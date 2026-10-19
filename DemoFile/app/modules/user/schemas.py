@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 class UserLoginRequest(BaseModel):
     """对应 UserLoginRequest.java。
 
-    username/password 在 Java 上是 @NotBlank —— 空值走步骤 1 的校验处理器，
-    变成 HTTP 400 + code 41000 + 字段 map。verifyCode 两个字段选填。
+    Java 侧 username/password 标注了 @NotBlank；空值由校验处理器转为 HTTP 400 +
+    code 41000 + 字段 map。verifyCode 两个字段选填。
     """
 
     username: str = Field(min_length=1)
@@ -24,7 +24,7 @@ class LoginResult(BaseModel):
 
 
 class CheckLoginResult(BaseModel):
-    """对应 CheckLoginResult.java。字段名自带 is 前缀，别改成 login/admin。"""
+    """对应 CheckLoginResult.java。字段名自带 is 前缀，与 Java 保持一致。"""
 
     isLogin: bool
     isAdmin: bool | None = None
@@ -33,7 +33,7 @@ class CheckLoginResult(BaseModel):
 
 
 class LoginVerifyImgResult(BaseModel):
-    """对应 LoginVerifyImgResult.java。v1 是 stub，只为让登录失败路径少一个 404。"""
+    """对应 LoginVerifyImgResult.java。当前为空实现，避免登录失败路径因 404 受干扰。"""
 
     imgBase64: str = ""
     uuid: str = ""

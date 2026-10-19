@@ -17,13 +17,11 @@ def get_site_config(db: Session) -> SiteConfig:
 
 
 def update_site_config(db: Session, config: SiteConfig) -> None:
-    """部分更新：只写 config 里**非 None** 的字段。
+    """部分更新：只写入 config 中非 None 的字段。
 
-    对应 SystemConfigService.updateSystemConfig()。
-
-    Java 那段的核心是一行 `if (val != null)`。这个语义是 install() 能只传两个字段
-    的前提，也是本步骤最容易写错的地方 —— 如果你实现成"整个 dict 覆写回表"，
-    一次安装就会把其余 78 行配置洗成 null，站点当场报废。
+    对应 SystemConfigService.updateSystemConfig()，语义等价于 Java 的
+    `if (val != null)`，也是 install() 只传部分字段的前提。必须保持部分更新：
+    整体覆写会把未传的配置行写成 null。
     """
     rows = {row.name: row for row in db.scalars(select(SystemConfig)).all()}
 
@@ -42,29 +40,16 @@ def update_site_config(db: Session, config: SiteConfig) -> None:
 
 
 def get_aes_hex_key_or_generate(db: Session) -> str:
-    """读 system_config.rsaHexKey（AES 密钥，HEX）；为空则生成一个并写回 DB。
+    """读取 system_config.rsaHexKey（AES 密钥，HEX），为空时生成并写回。
 
-    对应 SystemConfigService.getAesHexKeyOrGenerate()（Java 186-202 行）。
-    （名字叫 rsaHexKey 是 Java 的历史遗留 —— 存的是 AES 对称密钥。）
+    对应 SystemConfigService.getAesHexKeyOrGenerate()。字段名中的 rsa 是 Java 的
+    历史遗留，实际存储的是 AES 对称密钥。
 
-    用途：签名体系的地基。两个调用点：
-      - base.AbstractProxyTransferService._sign_download_url()（生成签名，7a）
-      - modules/storage/proxy_router.py 的 /pd/ 入口（校验签名，7b）
-
-    规格：
-      - select SystemConfig where name == "rsaHexKey"
-      - 行存在且 value 非空 → 直接返回 value
-      - value 为空 → 生成 16 字节随机密钥的 hex（secrets.token_hex(16) = 32 个字符；
-        Java SecureUtil.generateKey(AES) 默认也是 128 位）→ 写回该行 + commit → 返回
-      - 行不存在（正常不会，R__data.sql 已插）→ 新建 SystemConfig(name="rsaHexKey",
-        value=key) 入库再返回 —— ★ 必须落库：不落库的话每次调用都生成新密钥，
-        签了没法验，下载链路必挂（Java 在这条路上会直接 NPE，我们做得稳一点）
-
-    差异：Java 有 AES_CACHE + DTO 缓存，我们每次读库（先正确后优化）—— 写进注释。
-
-    TODO 写实现
+    签名生成（_sign_download_url）和校验（/pd/ 入口）都从这里取密钥。密钥为空时
+    生成 16 字节随机值的 hex（32 个字符，对应 Java 的 128 位密钥）并写回数据库；
+    行不存在时新建后落库。必须持久化，否则每次调用都会生成新密钥，已签发的下载
+    地址全部失效。Java 有缓存，这里每次读库，优先保证正确性。
     """
-    # raise NotImplementedError
     row = db.scalar(select(SystemConfig).where(SystemConfig.name == "rsaHexKey"))
 
     if row is not None and row.value:

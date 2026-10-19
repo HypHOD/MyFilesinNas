@@ -1,12 +1,11 @@
 """agent 接入层：mini-harness 装配 + DeepSeek provider + 存储工具。
 
-分两步走（对应仓库 README 路线图第 3 条「agent 接入进行存储管理」）：
-  Phase C（当前）：scripts/agent_console.py 在终端里跑通 provider + 工具；
-  Phase A（后续）：嵌入后端，暴露 /api/agent 的 HTTP/SSE 给前端。
+装配入口有两处：scripts/agent_console.py（终端调试）与 app/agent/host.py
+（后端 HTTP/SSE 宿主）。
 
 mini-harness 是仓库内的独立包（MyFilesinNas/mini-harness，零依赖）。
-未 pip install -e 时这里兜底把仓库路径加进 sys.path —— monorepo 布局定死
-（本文件往上第三层就是仓库根），写死即可。
+未执行 pip install -e 时，这里兜底把仓库路径加入 sys.path —— monorepo 布局固定，
+本文件向上第三层即仓库根。
 """
 
 import importlib.util

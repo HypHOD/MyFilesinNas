@@ -12,8 +12,7 @@ from app.modules.user.service import encrypt_password
 def get_system_is_installed(db: Session) -> bool:
     """对应 InstallService.getSystemIsInstalled()。
 
-    ⚠️ Swagger 上写的描述是"根据管理员用户名是否存在判断"，**是错的**。
-    代码读的是 system_config.installed。以代码为准。
+    以 system_config.installed 为准，而不是管理员用户名；Swagger 上的描述不可靠。
     """
     return bool(get_site_config(db).installed)
 
@@ -21,8 +20,8 @@ def get_system_is_installed(db: Session) -> bool:
 def install(db: Session, request: InstallSystemRequest) -> None:
     """对应 InstallService.install()。
 
-    只往 system_config 写 siteName + installed 两个字段 —— 正是"部分更新"语义要保证的东西。
-    管理员密码暂时存明文，步骤 3 换成 md5(sha1(密码) + salt)。
+    只向 system_config 写入 siteName 和 installed 两个字段，依赖部分更新语义。
+    管理员密码按现有规则加盐哈希后保存。
     """
 
     if get_system_is_installed(db):
@@ -35,8 +34,6 @@ def install(db: Session, request: InstallSystemRequest) -> None:
                            "系统异常，管理员用户不存在，请检测数据库或重建数据库。")
 
     admin.username = request.username
-    # TODO 步骤 3：改成 admin.password, admin.salt = encrypt_password(request.password)
-    # 现在是明文 —— 装完的系统登录必然失败（verify 会走无 salt 分支去比 md5）
     admin.password, admin.salt = encrypt_password(request.password)
-    # 不用再 db.commit()：update_site_config 内部的提交会把 admin 的改动一起带上
+    # update_site_config 内部的 commit 会一并提交 admin 的改动
     update_site_config(db, SiteConfig(siteName=request.siteName, installed=True))

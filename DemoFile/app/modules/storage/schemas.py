@@ -15,8 +15,7 @@ from app.core.path_utils import concat
 class FileListRequest(BaseModel):
     """对应 FileListRequest.java：POST /api/storage/files 的请求体。
 
-    用途：前端 useFileData.loadFile() 每个"打开目录"动作都发它 —— 点存储源、
-    进文件夹、点面包屑、点表头排序，全走这一条（useFileData.js:89-97 组装这 5 个字段）。
+    前端每次打开目录、点击面包屑或表头排序都会发送该请求，包含这 5 个字段。
     """
 
     storageKey: str
@@ -28,19 +27,12 @@ class FileListRequest(BaseModel):
     orderDirection: Literal["asc", "desc"] | None = None
 
     def handle_default_value(self) -> None:
-        """对应 handleDefaultValue()。router 拿到请求后第一件事就调它。
+        """对应 handleDefaultValue()，router 收到请求后首先调用。
 
-        用途：补默认值 + 规范化 path —— 之后整条链和 service 可以假定
-        path 一定以 '/' 开头、orderBy/orderDirection 一定有值，排序命令不用各自判空。
-
-        规格（照 Java FileListRequest.java:36-49）：
-          - path 为空 → "/"；orderBy 为空 → "name"；orderDirection 为空 → "asc"
-          - 最后 self.path = concat(self.path)（app/core/path_utils 的 concat）：
-            补前导 '/'、合并重复 '/' —— "a" → "/a"、"//a//b" → "/a/b"
-
-        TODO 写实现
+        补默认值并规范化 path，之后整条链可以假定 path 以 '/' 开头、排序参数有值。
+        path 为空时改为 "/"，orderBy 默认 "name"，orderDirection 默认 "asc"；
+        concat 负责补前导斜杠并合并重复斜杠。
         """
-        # raise NotImplementedError
         if not self.path:
             self.path="/"
         if not self.orderBy:

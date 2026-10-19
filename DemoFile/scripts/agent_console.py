@@ -1,4 +1,4 @@
-"""存储管理 agent 的终端控制台（Phase C：先跑通 provider + 工具，再嵌后端）。
+"""存储管理 agent 的终端控制台。
 
 用法：
     cd DemoFile && source .venv/bin/activate
@@ -10,7 +10,7 @@
 
 身份说明：agent loop 是创建时刻 create_task 起的常驻任务，contextvar 随创建
 快照进任务 —— 本脚本在创建 agent 前 set_current_user_id(ADMIN_ID)，工具因此
-以管理员身份（用户根 = /）执行。Phase A 嵌入后端时按登录用户设置同一处。
+以管理员身份（用户根 = /）执行。嵌入后端时由 HTTP 入口按登录用户设置同一处。
 """
 
 import asyncio
@@ -108,7 +108,7 @@ async def _repl(agent: Agent) -> None:
 
 
 async def _main(provider: DeepSeekProvider) -> None:
-    set_current_user_id(ADMIN_ID)  # ★ 必须在创建 agent 之前（loop task 继承快照）
+    set_current_user_id(ADMIN_ID)  # 必须在创建 agent 之前设置：loop task 会继承当前 context 快照
 
     print("装载存储源…")
     load_storage_sources()  # 与后端 lifespan 同一个装配口

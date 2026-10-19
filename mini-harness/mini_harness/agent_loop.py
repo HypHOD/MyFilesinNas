@@ -1,6 +1,6 @@
 """默认驱动器：turn/step 状态机 + 拦截点 + 取消合成。
 
-直译自 dsh ``packages/core/agent-loop``（docs/subsystems/agent-lifecycle.zh.md）：
+实现对齐 dsh ``packages/core/agent-loop``（docs/subsystems/agent-lifecycle.zh.md）：
 
 - 一次 followup = 一个 turn；turn 内含若干 step；step 产出了工具调用或有新输入
   则续 step，否则过 ``agent/turn-stopping``（serial）后收口 ``turn/end``；
@@ -11,13 +11,13 @@
   全部 ``tool/call`` 落盘；默认独占屏障逐个执行，连续一段显式
   ``is_concurrency_safe`` 的调用走有界并行池；结果按模型序提交；
 - 取消：已开工的调用合成「outcome is unknown」，未派发的合成
-  「aborted before dispatch」——保证日志里每个 tool/call 都有对应结果，
+  「aborted before dispatch」，保证日志里每个 tool/call 都有对应结果；
   失败与取消都不终止 loop（对照 agent.ts）。
 
-与 dsh 的差异：无重试预算、usage 记账、实时流帧；request-error 重试不设次数
-上限，由监听器把关。
+未实现：重试预算、usage 记账、实时流帧。request-error 重试不设次数上限，
+由监听器把关。
 
-阅读路标（建议按此顺序读方法）：
+主要方法：
     _run            常驻循环：等唤醒 → 领取 → 跑一轮
     _run_turn       轮次状态机：pre-step 入账 → step 循环 → turn-stopping → turn/end
     _run_step       单步：请求模型 → 若有 tool_calls 则调度工具
@@ -93,7 +93,7 @@ RequestErrorDecision = RequestErrorRetry | RequestErrorRaise
 
 @dataclass
 class _TurnState:
-    """轮次进行中的易失状态；取消合成依赖它知道「到哪了」。"""
+    """轮次进行中的易失状态；取消合成依赖它定位中断位置。"""
 
     turn: int
     step_no: int = 0
@@ -116,7 +116,7 @@ class AgentLoop:
     # -- 主循环 ----------------------------------------------------------
 
     async def _run(self, agent: Agent) -> None:
-        # loop 常驻：idle → 等 inbox 唤醒 → 有消息就跑一轮。
+        # 常驻循环：空闲时等待 inbox 唤醒，有消息则跑一轮。
         # cancel() 只中止当前轮，loop 本身不退出。
         try:
             while not agent.closed:
@@ -138,9 +138,9 @@ class AgentLoop:
 
     async def _run_turn(self, agent: Agent) -> None:
         session = agent.session
-        # turn 编号来自日志条数（只增日志 → 天然单调）
+        # turn 编号取自 turn/start 事件数；日志只增，编号天然单调。
         turn_no = len(session.events_of("turn/start")) + 1
-        # 轮次边界领取：next_step 全部 + 一条 next_turn（followup 的一条）
+        # 轮次边界领取：全部 next_step + 一条 next_turn（followup 的一条）。
         claimed = agent.inbox.claim_for_turn()
         if not claimed:
             return
@@ -170,9 +170,9 @@ class AgentLoop:
                     # 模型要调工具 → 直接进下一步，不触发 turn-stopping
                     claimed = agent.inbox.claim_for_step()
                     continue
-                # 终结检查点（serial）：模型没有工具调用了，问所有监听器还有没有收尾意见
+                # 终结检查点：模型不再调用工具，交由监听器决定是否有收尾动作。
                 await self._ctx.serial("agent/turn-stopping", agent)
-                # 收口前再看一眼有没有 steer/inject 插队
+                # 收口前再检查是否有 steer/inject 插队。
                 claimed = agent.inbox.claim_for_step()
                 if claimed:
                     continue

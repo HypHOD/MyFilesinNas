@@ -1,4 +1,4 @@
-"""mini-harness：模仿 DeepSeek Harness (dsh) 的最小插件式 agent loop。
+"""mini-harness：插件式 agent loop 的最小实现（语义对齐 DeepSeek Harness）。
 
 分层（自底向上）：
 
@@ -11,10 +11,9 @@
     agent      Agent 句柄 + Inbox + AgentRegistry（ctx.agents）
     agent_loop 默认驱动器：turn/step 状态机 + 拦截点 + 取消合成
 
-端到端阅读路标（数据怎么流过整个项目）：
+一次 followup 的数据流：
 
-    examples/demo.py 装配插件并 followup
-      → Context.plugin/activate（container.py）按 inject 自动激活插件
+    Context.plugin/activate（container.py）按 inject 激活插件
       → AgentRegistry.create（agent.py）建 Session、接 session/event、启动 loop
       → AgentLoop._run（agent_loop.py）从 inbox 领取消息
       → _run_turn / _run_step：pre-step → 请求模型 →（工具）→ 落日志 → turn/end

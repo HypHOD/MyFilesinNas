@@ -1,6 +1,6 @@
 """仅追加的会话事件日志与模型历史投影。
 
-直译自 dsh ``packages/core/session``（docs/subsystems/session.zh.md）：
+实现对齐 dsh ``packages/core/session``（docs/subsystems/session.zh.md）：
 
 - ``SessionEvent{type, seq, time, data}``：seq 单调递增，日志仅追加；
 - 核心事件：system/message、user/message、assistant/message、tool/call、tool/result、
@@ -11,14 +11,7 @@
 
 核心不变式「模型可见即已记录」：任何到达模型请求的内容都必须能从这份日志重建。
 
-与 dsh 的差异：纯内存（无 JSONL 持久化/迁移/resume/fork）、无 surface replace 压缩
-操作、无 system 节点协调（system/message 简单投影）。
-
-阅读提示：本文件是「事实之源」。``agent_loop.py`` 在每个阶段 append 一种事件；
-``agent.py`` 的 AgentRegistry.create() 把 append 通知接到 ``ctx.emit("session/event")``
-（logging 等观察者由此看到全过程）；下一次请求模型前，``_generate()`` 用
-``derive_messages()`` 从同一条日志重建历史。调试时打印 ``session.events``
-就能看到完整时间线。
+未实现：JSONL 持久化/迁移/resume/fork、surface replace 压缩、system 节点协调。
 """
 
 from __future__ import annotations
@@ -39,8 +32,7 @@ class SessionEvent:
 
 
 # -- 核心事件的 payload ---------------------------------------------------
-# 这些 dataclass 与 agent_loop.py 里的 session.append(...) 调用一一对应；
-# 想查「某类事件长什么样」，按类名反查 agent_loop 即可。
+# payload 与 agent_loop.py 中的 session.append(...) 调用一一对应。
 
 
 @dataclass(frozen=True)
@@ -130,7 +122,7 @@ class Session:
 
 def derive_messages(session: Session) -> list[ModelMessage]:
     """从日志投影模型历史（纯函数，可随时重放）。"""
-    # 投影规则（核心不变式「模型可见即已记录」）：
+    # 投影规则：
     #   system/message    → 原样进入历史
     #   user/message      → 取 message
     #   assistant/message → 仅当内容非空；取消产生的空消息不污染历史

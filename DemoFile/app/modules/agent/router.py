@@ -1,4 +1,4 @@
-"""agent 会话路由（Phase A）：HTTP 控制面 + SSE 事件流。
+"""agent 会话路由：HTTP 控制面 + SSE 事件流。
 
     POST   /api/agent/session              新建会话（当前登录用户）
     GET    /api/agent/sessions             列出自己的会话

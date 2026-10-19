@@ -1,6 +1,6 @@
 """工具子系统：注册表与带把关的执行流水线。
 
-直译自 dsh ``packages/core/tools``（docs/subsystems/tools.zh.md）：
+实现对齐 dsh ``packages/core/tools``（docs/subsystems/tools.zh.md）：
 
 - ToolDefinition = {name, description, parameters(JSON Schema), execute, is_concurrency_safe}；
   ``schemas()`` 是给模型的白名单投影，execute 与回调不外泄；
@@ -8,16 +8,14 @@
   （单调：deny 不可被下游翻回）→ ``tools/execute`` waterfall（环绕真实执行）→
   ``tools/post-execute`` waterfall → accept{content?} | block{feedback}；
 - 失败是 ``ToolResultMessage(is_error=True)``，错误以 ``Error: ...`` 文本进入模型
-  历史，**失败不终止轮次**；
+  历史，失败不终止轮次；
 - execution_mode：默认 exclusive（独占屏障），显式 ``is_concurrency_safe`` 才并行——
   调度发生在 agent_loop（对照 ``packages/core/agent-loop/src/tool-calls.ts``）。
 
-与 dsh 的差异：砍掉审批(ask)/sandbox/结果 schema 校验/concludeTurn；execute 只返回字符串。
+未实现：审批(ask)、sandbox、结果 schema 校验、concludeTurn；execute 只返回字符串。
 
-阅读提示：``agent_loop._run_tool_calls()`` 对每个 ToolCallBlock 调
-``run_tool_pipeline()``。本文件负责「单次调用」的三段流水线；agent_loop 负责
-「多次调用」的独占/并行调度。三个 waterfall 事件分别允许插件：准入把关（pre）、
-包裹执行（execute）、改写结果（post）。
+本文件负责「单次调用」的三段流水线；agent_loop 负责「多次调用」的独占/并行调度。
+三个 waterfall 事件分别用于：准入把关（pre）、包裹执行（execute）、改写结果（post）。
 """
 
 from __future__ import annotations
@@ -157,8 +155,8 @@ async def run_tool_pipeline(
 
     view = ToolCallView(call_id=call_id, name=name, arguments=parsed, raw_arguments=raw_arguments)
 
-    # 第一段：准入。guard_plugin 就在这一层工作：返回 Deny 时不调 next()，
-    # 瀑布链短路，default（放行）和后面的执行都不会发生。
+    # 第一段：准入。返回 Deny 时不调用 next()，瀑布链短路，
+    # default（放行）与后续执行都不会发生。
     pre: PreToolDecision = await ctx.waterfall(
         "tools/pre-execute", view, default=lambda _view: PreToolAllow()
     )
@@ -209,8 +207,7 @@ class ToolsPlugin:
         self._tools = tuple(tools)
 
     def apply(self, ctx) -> None:
-        # 装配套路与 LlmPlugin 相同：先 provide 服务，再把每个注册的 disposer
-        # 记进插件作用域 → 插件卸载时工具自动全部注销。
+        # 先 provide 服务，再按插件作用域登记每个注册的 disposer；卸载时工具自动注销。
         registry = ToolRegistry()
         ctx.provide("tools", registry)
         for tool in self._tools:

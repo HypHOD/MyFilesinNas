@@ -1,10 +1,10 @@
-"""路径 / URL 拼接工具。对应 Java 的 core/util/StringUtils.java + core/util/FileUtils.java。
+"""路径 / URL 拼接工具。
 
-Java 那两个类同时管 URL、路径、字符串三件事，Python 侧只搬存储层真正要用的几个函数，
-用到再加（和 ErrorCode 一个策略）。
+对应 Java 的 core/util/StringUtils.java + core/util/FileUtils.java。Java 这两个类
+同时承担 URL、路径与字符串处理；这里只实现存储层实际使用的函数。
 
-⚠️ 这几个函数的边界行为是**刻意对齐 Java** 的。"看起来更干净"的改法
-（比如用 os.path.join、pathlib）会在这里埋下不一致，改动前先回头看 Java 原实现。
+这些函数的边界行为刻意与 Java 保持一致。不要用 os.path.join / pathlib 等
+"看起来更干净"的方式改写；修改前先对照 Java 原实现。
 """
 
 from urllib.parse import quote
@@ -28,10 +28,10 @@ def trim_slashes(path: str | None) -> str | None:
 
 
 def _remove_duplicate_slashes(path: str) -> str:
-    """合并连续重复的 '/'，但不动 "://" 头部（否则 http:// 会被压成 http:/）。
+    """合并连续重复的 '/'，但保留 "://" 头部（否则 http:// 会被压成 http:/）。
 
-    对应 Java: StringUtils.removeDuplicateSlashes。
-    注意它**不去结尾的 '/'**（那是另一个函数 removeDuplicateSlashesAndTrimEnd 的活）。
+    对应 Java: StringUtils.removeDuplicateSlashes。它不去结尾的 '/'；
+    去尾斜杠由 removeDuplicateSlashesAndTrimEnd 负责。
     """
     if not path:
         return path
@@ -58,10 +58,10 @@ def _remove_duplicate_slashes(path: str) -> str:
 def concat(*parts: str | None) -> str:
     """拼接路径 / URL。对应 Java: StringUtils.concat(strs)。
 
-    规则（照抄，别"优化"）：
-      - 结果**永远是绝对路径**：开头必有一个 '/'
-      - 空串 / None 段跳过，但分隔符是按**下标**加的，多余的空档交给
-        _remove_duplicate_slashes 收掉
+    规则（与 Java 保持一致，不要改写）：
+      - 结果永远是绝对路径：开头必有一个 '/'
+      - 空串 / None 段跳过，但分隔符按原始下标添加，多余的空档交给
+        _remove_duplicate_slashes 处理
       - "://" 头部不被破坏 → concat("http://a.com", "/x") == "http://a.com/x"
 
     >>> concat("/data", "/alice/", "/sub", "a.txt")
@@ -106,9 +106,9 @@ def get_parent_path(path_and_name: str | None) -> str:
 def encode_ignore_slashes(path: str | None) -> str | None:
     """percent-encode，但保留 '/' 当分隔符。对应 Java: StringUtils.encodeAllIgnoreSlashes。
 
-    Java 是**按 '/' 分段**再逐段 hutool `URLEncodeUtil.encodeAll`，
-    效果等价于 `quote(safe="/")`：空格 -> %20，中文 -> UTF-8 三字节。
-    （这一条步骤 6/7 会拿真前端再核对一次：URL 里的中文一旦编错，下载就 404。）
+    Java 按 '/' 分段后逐段调用 hutool ``URLEncodeUtil.encodeAll``，
+    效果等价于 ``quote(safe="/")``：空格 → %20，中文 → UTF-8 三字节。
+    中文编码错误会直接导致下载 404。
     """
     if not path:
         return path

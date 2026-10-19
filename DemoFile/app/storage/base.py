@@ -1,32 +1,32 @@
 """存储抽象层。对应 Java module/storage/service/base/ 包。
 
-四层，每层只加一件事 —— **前三层一行文件 IO 都没有**：
+四层，前三层不涉及文件 IO：
 
-    BaseFileService(ABC)            15 个方法 = 所有存储源的公共能力清单（接口）
+    BaseFileService(ABC)            所有存储源的公共能力清单（15 个方法）
     AbstractBaseFileService         实例状态 + init 守卫 + 用户根目录解析
     AbstractProxyTransferService    服务端中转的 URL 拼装（/pd、/file/upload）
-    LocalServiceImpl                真正碰文件系统
+    LocalServiceImpl                实际文件系统实现
 
-以后加 S3 实现时，上面三层的活全是白送的 —— 这就是抽象的价值。抽象方法其实只有
-4 个：_init / get_storage_source_metadata / upload_file / download_to_stream。
+新增 S3 等实现时，前三层能力可直接复用。抽象方法只有 4 个：
+_init / get_storage_source_metadata / upload_file / download_to_stream。
 
-命名约定：**方法 snake_case，数据字段保持 Java 原名（camelCase）**。
-字段名是线上契约（DB 列名 / JSON key / 前端读的 key），方法名不是。
+命名约定：方法使用 snake_case，数据字段保持 Java 原名（camelCase）。
+字段名是线上契约（DB 列名 / JSON key / 前端读取的 key），方法名不是。
 
-★ 路径契约（本文件最重要的东西，写错 = 越权访问）：
+路径契约（本文件最关键的部分，写错会导致越权访问）：
 
     相对入参族：file_list / get_file_item / new_folder / delete_* / rename_* /
                 copy_* / move_* / upload_file
-        入参是**相对用户根**的路径（"/"、"/foo"）。
-        实现内部**要**调 get_current_user_base_path() 拼出真实路径。
+        入参是相对用户根的路径（"/"、"/foo"），实现内部需要调用
+        get_current_user_base_path() 拼出真实路径。
 
     绝对入参族：get_download_url / download_to_stream
-        入参**已经含用户根**（调用方拼好的）。
-        实现内部**绝不**再拼 —— 它们的调用链（直链 / 短链 / 分享 / 代理回源）跑在
-        匿名线程或跨用户上下文里，那时 get_current_user_base_path() 拿到的是匿名用户的
-        根目录，二次拼接 = 下错文件 / 404。Java 仓库的 469b9d4 就是修这个 bug 的提交。
+        入参已包含用户根（调用方拼接完成），实现内部绝不能再拼。它们的调用链
+        （直链 / 短链 / 分享 / 代理回源）运行在匿名线程或跨用户上下文中，此时
+        get_current_user_base_path() 返回匿名用户根目录，二次拼接会导致下错文件
+        或 404。Java 仓库的提交 469b9d4 即为修复该问题。
 
-    同一个类里两种写法并存，这是刻意的。
+    同一个类中两种写法并存，这是刻意设计。
 """
 
 from abc import ABC, abstractmethod
@@ -95,7 +95,7 @@ class BaseFileService(ABC):
 
     @abstractmethod
     def get_download_url(self, path_and_name: str) -> str:
-        """★ 绝对入参：path_and_name **已含用户根**，实现里不得再拼 get_current_user_base_path()。"""
+        """下载地址。绝对入参：path_and_name 已含用户根，实现内不得再拼接 get_current_user_base_path()。"""
 
     @abstractmethod
     def get_storage_type(self) -> StorageType: ...
@@ -107,9 +107,9 @@ class BaseFileService(ABC):
 class AbstractBaseFileService(BaseFileService, Generic[P]):
     """对应 AbstractBaseFileService.java：实例状态 + 初始化 + 用户根目录解析。
 
-    「一存储源一实例」的载体就是这里的状态：param 里装着 filePath、domain 这些
-    来自 DB 的配置。Java 靠 @Scope(PROTOTYPE) 保证每个存储源一个对象，
-    Python 不需要框架帮忙 —— 步骤 5 的 loader 每个存储源 new 一个就是了。
+    「一存储源一实例」的状态载体：param 保存 filePath、domain 等来自数据库的配置。
+    Java 通过 @Scope(PROTOTYPE) 保证每个存储源一个对象；Python 不需要框架，
+    loader 在装配时逐个 new 即可。
     """
 
     def __init__(self) -> None:
@@ -122,20 +122,18 @@ class AbstractBaseFileService(BaseFileService, Generic[P]):
         self.is_initialized: bool = False
 
     def init(self, name: str, storage_id: int, storage_key: str, param: P) -> None:
-        """对应 Java 的 init(name, storageId, param)（我们多一个 storage_key）。
+        """对应 Java 的 init(name, storageId, param)（这里多一个 storage_key）。
 
-        两道守卫，照抄：
-          - 字段都已被设置 → 重复初始化，抛 IllegalStateException
-          - 任一入参为空   → 抛 IllegalStateException
-        ⚠️ 陷阱：Java 的 ObjUtil.hasEmpty 对数字 0 判 false（不算空），
-        Python 的 `not storage_id` 会把 0 当成空 —— 用 `is None`，别用真值判断。
+        两个守卫与 Java 一致：
+          - 字段已被设置 → 重复初始化，抛 IllegalStateException
+          - 任一入参为空 → 抛 IllegalStateException
 
-        最后调子类的 _init()（Java 里是那个无参抽象 init()，Python 没法同名重载，
-        改成下划线前缀的内部钩子）。
+        注意：Java 的 ObjUtil.hasEmpty 对数字 0 判定为 false（不算空），而 Python 的
+        `not storage_id` 会把 0 视为空，因此使用 `is None` 判断。
 
-        TODO 写实现
+        最后调用子类的 _init()（Java 中为无参抽象 init()；Python 无法同名重载，
+        改为下划线前缀的内部钩子）。
         """
-        # raise NotImplementedError
         if self.name is not None or self.storage_id is not None or self.storage_key is not None or self.param is not None:
             raise RuntimeError("请勿重复初始化")
         if not name or storage_id is None or not storage_key or param is None:
@@ -152,16 +150,11 @@ class AbstractBaseFileService(BaseFileService, Generic[P]):
         """对应 Java 抽象 init()：子类自己的初始化（本地存储 = 校验 filePath 目录存在）。"""
 
     def test_connection(self) -> None:
-        """对应 testConnection()：能列出根目录就算连接成功。
+        """对应 testConnection()：能列出根目录即视为连接成功。
 
-        启动期调用 —— 那会儿没有请求上下文，所以下面 get_current_user_base_path()
-        里"未初始化则强制用管理员 id"那条分支是必须的，不是怪癖。
-
-        TODO：self.file_list("/")；成功则 is_initialized = True；
-              任何异常包成 BizException(ErrorCode.BIZ_STORAGE_INIT_ERROR,
-              f"初始化异常, 错误信息为: {e}")（Java 是 InitializeStorageSourceBizException）。
+        启动期调用，此时没有请求上下文，因此 get_current_user_base_path() 中
+        "未初始化则强制使用管理员 id"的分支是必需的。
         """
-        # raise NotImplementedError
         try:
             self.file_list("/")
             self.is_initialized=True
@@ -169,21 +162,16 @@ class AbstractBaseFileService(BaseFileService, Generic[P]):
             raise BizException(ErrorCode.BIZ_STORAGE_INIT_ERROR, f"初始化失败,错误信息为: {e}") from e
 
     def get_current_user_base_path(self) -> str:
-        """对应 getCurrentUserBasePath()。★ 只有"相对入参族"的方法才准调它。
+        """对应 getCurrentUserBasePath()。只有"相对入参族"的方法可以调用它。
 
-        Java 算法（顺序别换）：
-          ① 分享访问优先：ShareAccessContext.isShareAccess() → getShareBasePath()
-             （本步跳过，等做分享那步再接 —— 留个 TODO 注释占位）
-          ② user_id = ZFileAuthUtil.getCurrentUserId()
-             → 这边对应 app.core.context.get_current_user_id()；
-               contextvar 是 None（不在请求上下文里）时兜底 ANONYMOUS_ID
-          ③ if not self.is_initialized: user_id = ADMIN_ID   ← 见 test_connection 注释
-          ④ root_path = self._lookup_user_root_path(user_id)
-             查不到 或 为空 → "/"
-
-        TODO 写实现
+        算法（顺序不可调换）：
+          1. 分享访问优先：ShareAccessContext.isShareAccess() → getShareBasePath()
+             （分享功能尚未实现，待接入时补齐）
+          2. user_id = context.get_current_user_id()；contextvar 为 None（不在请求
+             上下文中）时兜底 ANONYMOUS_ID
+          3. if not self.is_initialized: user_id = ADMIN_ID（见 test_connection）
+          4. root_path = self._lookup_user_root_path(user_id)；查不到或为空 → "/"
         """
-        # raise NotImplementedError
         user_id = context.get_current_user_id()
         if user_id is None:
             user_id = ANONYMOUS_ID
@@ -192,21 +180,16 @@ class AbstractBaseFileService(BaseFileService, Generic[P]):
         return self._lookup_user_root_path(user_id) or "/"
     
     def _lookup_user_root_path(self, user_id: int) -> str | None:
-        """查 user_storage_source 表拿 (user_id, storage_id) 的 root_path。
+        """查询 user_storage_source 中 (user_id, storage_id) 的 root_path。
 
-        对应 Java 的 userStorageSourceService.getByUserIdAndStorageId()。
+        对应 Java userStorageSourceService.getByUserIdAndStorageId()。
 
-        规格：
-          - 无授权行 或 root_path 为空 → 返回 None（调用方 get_current_user_base_path 兜底 "/"）
-          - 短会话：`with SessionLocal() as db:` —— service 实例是长期对象、被线程池共享，
-            **绝不能**把 Session 存成实例属性
-          - storage_id 用 self.storage_id（已 init，非 None → 记得断言收窄）
-          - 差异：Java 对查询结果有缓存，我们先不缓存（SQLite 本地读，先正确后优化），
-            把这条差异写进注释
-          - 测试里这个方法会被 make_service 整个覆写成常量 lambda —— 所以本实现
-            改了也不影响 34 条 pytest，放心改
-
-        TODO 写实现
+        无授权行或 root_path 为空 → 返回 None（由调用方兜底 "/"）。
+        使用短会话 `with SessionLocal() as db:`：service 实例是长期对象、被线程池
+        共享，绝不能把 Session 存为实例属性。
+        storage_id 使用 self.storage_id（已 init，非 None，用断言收窄）。
+        与 Java 的差异：Java 对查询结果有缓存，这里暂不缓存（SQLite 本地读取，
+        优先正确性）。
         """
         assert self.storage_id is not None
 
@@ -242,23 +225,15 @@ class AbstractProxyTransferService(AbstractBaseFileService[ProxyP]):
     PROXY_UPLOAD_LINK_PREFIX = "/file/upload"
 
     def get_proxy_download_url(self, path_and_name: str, use_param_domain: bool = False) -> str:
-        """对应 getProxyDownloadUrl(pathAndName, useParamDomain)。产出形如
-        `{base_url}/pd/{storageKey}/{encode(path)}?signature={sig}`。
+        """生成代理下载地址 `{base_url}/pd/{storageKey}/{encode(path)}?signature={sig}`。
 
-        Java 的四步：
-          ① 隐藏文件（basename 以 '.' 开头）特殊处理：文件名挪到 `?filename=` 查询参数，
-             URL 路径退成父目录。**原因**：`/pd/xxx/.env` 会被静态资源安全规则拦掉。
-             （计划里说第一版可跳过 —— 跳过就在这儿留 TODO 写清原因）
-          ② 签名：proxyPrivate ? 带过期时间 : 永久签名。
-             ⚠️ 签名对象是**完整的 path_and_name（带文件名）**，不是 ① 截断后的 path。
-             本步先调 self._sign_download_url()，它步骤 7 才有真实现。
-          ③ URL：use_param_domain 且 param.domain 非空 → param.domain + encode(path)；
-             否则 → self._get_base_url() + "/pd" + storage_key + encode(path)
-          ④ 有查询串就拼到 URL 末尾（"?" + query）
+        隐藏文件（basename 以 '.' 开头）把文件名挪进 `?filename=`，URL 路径退到父目录：
+        `/pd/xxx/.env` 会被静态资源安全规则拦截。签名对象始终是完整的 path_and_name
+        （含文件名），而不是截断后的父目录——签名端和校验端必须逐字符一致。
 
-        TODO 写实现
+        use_param_domain 且 param.domain 非空时直接使用配置的域名，否则回落为
+        _get_base_url() + 代理前缀。
         """
-        # raise NotImplementedError
         path = path_and_name
         query: dict[str, str] = {}
         filename = get_name(path_and_name)
@@ -282,14 +257,11 @@ class AbstractProxyTransferService(AbstractBaseFileService[ProxyP]):
         return url
 
     def get_proxy_upload_url(self, path: str, name: str) -> str:
-        """对应 getProxyUploadUrl(path, name)：拼 `/file/upload/{storageKey}/{path/name}`。
+        """生成代理上传地址 `/file/upload/{storageKey}/{path}/{name}`。
 
-        隐藏文件同样走 `?filename=` 形式（Java 122-125 行），但这里**没有签名**。
-        与下载不同的另一点：fullPath 是 concat(path, name)。
-
-        TODO 写实现
+        隐藏文件同样走 `?filename=` 形式，但上传没有签名。fullPath 是
+        concat(path, name)，与下载接口直接接收 path_and_name 不同。
         """
-        # raise NotImplementedError
         full_path = concat(path,name)
         query:dict[str,str] = {}
 
@@ -307,22 +279,16 @@ class AbstractProxyTransferService(AbstractBaseFileService[ProxyP]):
         return url
 
     def _get_base_url(self) -> str | None:
-        """对应 SystemConfigService.getAxiosFromDomainOrSetting()。拼下载地址用。
+        """解析拼 URL 用的后端根地址，对应 SystemConfigService.getAxiosFromDomainOrSetting()。
 
-        三级优先（照抄 Java，顺序别换）：
-          ① system_config.forceBackendAddress 非空 → 用它
-             （读法：get_site_config(db).forceBackendAddress；storage 层到 modules 层是
-               向上依赖，用**函数内延迟 import**，别写在文件顶部）
-          ② context.get_axios_from()      ← 请求头 axios-from，前端 zfile.config.json 的 baseUrl
-          ③ context.get_request_base_url() ← 请求自身地址（反向代理场景靠 X-Forwarded-*）
+        优先级固定为：system_config.forceBackendAddress → 请求头 axios-from（前端
+        zfile.config.json 的 baseUrl）→ 当前请求地址（反向代理场景依赖 X-Forwarded-*）。
 
-        启动期（test_connection 触发的 URL 拼装）②③ 都是 None → 返回 None，
-        concat 会跳过空段得到相对路径（无害）。
-
-        差异：Java 对 system_config 有缓存，我们每次读 DB（先正确后优化）—— 写进注释。
-        测试里覆写它（如返回 "http://127.0.0.1:8080"），实现改了不影响 34 条 pytest。
+        storage 层引用 modules.config 属于向上依赖，沿用函数内延迟 import。
+        system_config 每次读 DB，未做缓存：Java 有缓存，这里先保证正确性。
+        启动期 test_connection 也会调用本方法，此时后两级均为 None，返回 None 后
+        concat 跳过空段得到相对路径。
         """
-        # raise NotImplementedError
         from app.modules.config.service import get_site_config
         with SessionLocal() as db:
             force_backend_address = get_site_config(db).forceBackendAddress
@@ -331,24 +297,15 @@ class AbstractProxyTransferService(AbstractBaseFileService[ProxyP]):
         return context.get_axios_from() or context.get_request_base_url()
 
     def _sign_download_url(self, path_and_name: str) -> str:
-        """下载签名。对应 ProxyDownloadUrlUtils.generatorSignature / generatorPermanentSignature。
+        """生成下载签名，对应 ProxyDownloadUrlUtils.generatorSignature。
 
-        调用点：本类 get_proxy_download_url() —— 列表里每个文件项的 url 都经过这里。
+        proxyPrivate（默认 True）走带过期时间的签名，否则走永久签名；AES 密钥
+        每次从 system_config 读取。storage 层引用 modules.config 为向上依赖，
+        用函数内延迟 import。
 
-        规格（照 Java getProxyDownloadUrl 79-81 行）：
-          - param.proxyPrivate（默认 True）→ sign.generator_signature(
-                self.storage_id, path_and_name, self.param.proxyTokenTime, hex_key)
-          - 否则 → sign.generator_permanent_signature(self.storage_id, path_and_name, hex_key)
-          - hex_key 从 modules.config.service.get_aes_hex_key_or_generate(db) 来：
-                with SessionLocal() as db:  hex_key = get_aes_hex_key_or_generate(db)
-            storage 层 → modules 层是向上依赖，照 _get_base_url 的先例用**函数内延迟 import**
-          - assert self.storage_id is not None（init 后必非空）
-
-        ★ 签名对象就是入参 path_and_name 原样（含文件名、含用户根）—— 它必须和 URL 里
-          encode 前的那段路径逐字符一致，校验端（7b）靠同一段路径比对。别在这里做任何裁剪。
+        签名对象是入参 path_and_name 原样（含文件名、含用户根），必须与 URL 中
+        encode 前的路径逐字符一致——代理端用同一字符串校验，这里不能做任何裁剪。
         """
-        # raise NotImplementedError
-        # return "TODO-signature"
         from app.core.sign import generator_permanent_signature, generator_signature
         from app.modules.config.service import get_aes_hex_key_or_generate
 
@@ -363,11 +320,11 @@ class AbstractProxyTransferService(AbstractBaseFileService[ProxyP]):
 
     @abstractmethod
     def upload_file(self, path_and_name: str, input_stream, size: int | None) -> None:
-        """上传文件。★ 绝对入参（步骤 6 的上传功能才会用到）。"""
+        """上传文件。绝对入参：path_and_name 已包含用户根。"""
 
     @abstractmethod
-    def download_to_stream(self, path_and_name: str,range_header: str | None = None):
-        """代理回源下载，返回 HttpResponse。★ 绝对入参，**绝不**再拼用户根目录。
+    def download_to_stream(self, path_and_name: str, range_header: str | None = None):
+        """代理回源下载，返回可流式响应的 Response，支持 HTTP Range。
 
-        步骤 7 实现（含 HTTP Range / 206）。
+        绝对入参：path_and_name 已包含用户根，实现内不得再拼接用户根。
         """

@@ -1,4 +1,4 @@
-"""存储层枚举。对应 Java module/storage/model/enums/ 包。用到哪个抄哪个。"""
+"""存储层枚举，对应 Java module/storage/model/enums/ 包。"""
 
 from enum import Enum
 
@@ -43,9 +43,8 @@ class UploadType(str, Enum):
 class FileOperatorType(str, Enum):
     """对应 FileOperatorTypeEnum 的 value 部分（19 个）。
 
-    顺序照抄 Java —— build_permission_map 遍历它生成 {value: bool} 的权限表，
-    顺序一致方便和 Java 侧对拍。Java 枚举里的中文描述是给后台管理界面用的，
-    步骤 5 用不到，先不搬。
+    顺序与 Java 一致：build_permission_map 遍历它生成 {value: bool} 权限表，保持
+    顺序便于与 Java 侧对照。Java 枚举中的中文描述供后台管理界面使用，暂未搬运。
     """
 
     AVAILABLE = "available"

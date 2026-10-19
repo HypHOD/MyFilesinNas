@@ -5,9 +5,7 @@ from app.core.db import Base
 
 
 class SystemConfig(Base):
-    """system_config 表。四列 KV，一行一个配置项。
-
-    """
+    """system_config 表。四列 KV，一行一个配置项。"""
 
     __tablename__ = "system_config"
 

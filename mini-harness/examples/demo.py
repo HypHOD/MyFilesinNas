@@ -1,10 +1,10 @@
 """mini-harness 端到端演示：两幕脚本化场景。
 
     幕一  正常工具轮次：read_file 被调用、执行、结果回给模型、模型收尾；
-    幕二  guard 拦截：路径穿越被 tools/pre-execute 拒绝，模型看到的只有
+    幕二  guard 拦截：路径穿越被 tools/pre-execute 拒绝，模型只看到
           ``Error: ...`` 文本（「模型可见即已记录」）。
 
-全程使用脚本化 MockProvider——无网络、无 key、确定性；运行：``python examples/demo.py``
+全程使用脚本化 MockProvider：无网络、无 key、确定性。运行：``python examples/demo.py``
 """
 
 from __future__ import annotations
@@ -69,8 +69,8 @@ async def main() -> None:
     )
 
     ctx = Context()
-    # 挂载顺序无关紧要：AgentLoopPlugin 声明 inject=("agents","tools","llm")，
-    # 依赖齐了才会被容器激活（见 container._activate_parked）。
+    # AgentLoopPlugin 声明 inject=("agents","tools","llm")，依赖齐了才会被容器激活，
+    # 因此挂载顺序无关。
     ctx.plugin(LlmPlugin([provider]))          # 提供 ctx.llm
     ctx.plugin(demo_tools_plugin(workspace))   # 提供 ctx.tools（read_file + echo）
     ctx.plugin(GuardPlugin())                  # 拦截 read_file 的路径穿越

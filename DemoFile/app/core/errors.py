@@ -23,7 +23,7 @@ class ErrorCode(Enum):
         self.msg = msg
 
 class BizException(Exception):
-    '''HTTP状态码默认设置为500'''
+    """业务异常。HTTP 状态码默认 500，由全局异常处理器转换为响应信封。"""
     http_status = 500
     def __init__(self, error_code: ErrorCode, msg: str | None = None) -> None:
         self.error_code = error_code
@@ -38,11 +38,11 @@ class UnauthorizedAccessException(BizException):
 
 
 class FilePathSecurityBizException(BizException):
-    """对应 Java FilePathSecurityBizException：路径含 ../ 之类的穿越企图。
+    """对应 Java FilePathSecurityBizException：路径包含 ../ 等穿越企图。
 
-    单独一个类是为了带上非法路径（Java 侧全局处理器会 log.warn 出来）——
-    这类日志是入侵探测的信号，别混进普通的"文件不存在"里。
-    异常处理器不用改：BizException 的通用分支已经接住了。
+    单独成类是为了携带非法路径，便于全局处理器记录 warning。这类日志是入侵探测
+    信号，不应与普通的"文件不存在"混在一起。异常处理器无需特殊处理，
+    BizException 的通用分支会接住。
     """
 
     def __init__(self, path: str) -> None:
