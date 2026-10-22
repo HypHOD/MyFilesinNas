@@ -1,14 +1,4 @@
 """装配与宿主：mini-harness 容器 + DeepSeek 提供方 + 存储工具 + 会话管理。
-
-两层：
-  build_context(provider)：组装容器（与 examples/demo.py 的组装段对应），CLI 与
-      后端共用；
-  AgentHost：常驻宿主的生命周期与对外控制面 —— lifespan 启停、按登录用户建/查/
-      销 agent、SSE 事件流的唤醒与重放。HTTP 层（app/modules/agent）只依赖它。
-
-用户身份：agent loop 是创建时刻 create_task 起的常驻任务，contextvar 随创建快照
-进入任务 —— 会话在哪个用户的请求中创建，工具就以哪个用户（及其存储根/授权）执行。
-create() 中显式 set 一次，使该不变量不依赖上层调用点。
 """
 
 from __future__ import annotations
@@ -52,6 +42,7 @@ async def build_context(provider: LlmProvider) -> Context:
     return ctx
 
 
+
 class _OwnedAgent:
     """agent + 归属用户 + SSE 唤醒标记（一条流一个消费者共享同一个 tick 足够）。"""
 
@@ -62,7 +53,8 @@ class _OwnedAgent:
         self.user_id = user_id
         self.tick = asyncio.Event()
 
-
+# 宿主类 常驻的管理器 由lifespan控制
+# 目前会话全部内存存储
 class AgentHost:
     """常驻宿主：后端嵌入形态的会话管理入口。
 
@@ -82,6 +74,7 @@ class AgentHost:
     def enabled(self) -> bool:
         return self._ctx is not None
 
+    # 初始化agent 装配harness
     async def start(self) -> None:
         if self._ctx is not None:
             return

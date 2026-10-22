@@ -1,6 +1,5 @@
 """工具子系统：注册表与带把关的执行流水线。
 
-实现对齐 dsh ``packages/core/tools``（docs/subsystems/tools.zh.md）：
 
 - ToolDefinition = {name, description, parameters(JSON Schema), execute, is_concurrency_safe}；
   ``schemas()`` 是给模型的白名单投影，execute 与回调不外泄；
@@ -35,13 +34,13 @@ ToolExecuteFn = Callable[[dict[str, Any]], "str | Awaitable[str]"]
 
 @dataclass(frozen=True)
 class ToolDefinition:
-    # name/description/parameters 是给模型看的白名单投影（schemas() 只导出这三项）
+    # name/description/parameters 给模型看的工具上下文投影
     name: str
     description: str
     parameters: dict[str, Any]
     # execute 只在服务端执行，绝不发给模型
     execute: ToolExecuteFn
-    # 显式声明 True 才允许与相邻安全工具并行；默认独占（agent_loop 调度用）
+    # 显式声明 True 才允许与相邻安全工具并行；默认独占
     is_concurrency_safe: bool = False
 
 
@@ -65,6 +64,7 @@ class ToolCallView:
 # post 阶段：Accept 可改写输出（content=None 表示用原文）；Block 把结果换成拒绝反馈。
 
 
+# pre阶段策略 allow pass; deny 直接短路
 @dataclass(frozen=True)
 class PreToolAllow:
     pass
@@ -78,6 +78,7 @@ class PreToolDeny:
 PreToolDecision = PreToolAllow | PreToolDeny
 
 
+# exc阶段类型 成功 输出文本; 失败 失败码+消息
 @dataclass(frozen=True)
 class ToolRunSuccess:
     output: str
@@ -92,6 +93,7 @@ class ToolRunFailure:
 ToolRunOutcome = ToolRunSuccess | ToolRunFailure
 
 
+# post阶段: accept 可改写输出; block 结果换成拒绝反馈
 @dataclass(frozen=True)
 class PostToolAccept:
     content: str | None = None  # None → 采用执行输出原文
@@ -106,12 +108,13 @@ PostToolDecision = PostToolAccept | PostToolBlock
 
 
 class ToolRegistry:
-    """注册在 ``ctx.tools``：工具注册表。"""
+    """注册在 ``ctx.tools``：工具注册表 """
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
 
     def register(self, tool: ToolDefinition) -> Disposer:
+        '''注册工具 返回disposer'''
         if tool.name in self._tools:
             raise RuntimeError(f"tool already registered: {tool.name!r}")
         self._tools[tool.name] = tool
@@ -122,16 +125,18 @@ class ToolRegistry:
         return dispose
 
     def get(self, name: str) -> ToolDefinition | None:
+        '''按工具名查找定义'''
         return self._tools.get(name)
 
     def schemas(self) -> tuple[dict[str, Any], ...]:
-        """给模型的白名单投影：只有 name/description/parameters。"""
+        """给模型的白名单投影：只有 name/description/parameters。防止数据泄漏"""
         return tuple(
             {"name": t.name, "description": t.description, "parameters": t.parameters}
             for t in self._tools.values()
         )
 
 
+# 主流水线 单次工具调用三段式
 async def run_tool_pipeline(
     ctx: Context,
     *,
@@ -152,7 +157,7 @@ async def run_tool_pipeline(
     tool = ctx.tools.get(name)
     if tool is None:
         return _failure(call_id, "UNKNOWN_TOOL", f"unknown tool: {name}")
-
+    # 只读视图
     view = ToolCallView(call_id=call_id, name=name, arguments=parsed, raw_arguments=raw_arguments)
 
     # 第一段：准入。返回 Deny 时不调用 next()，瀑布链短路，

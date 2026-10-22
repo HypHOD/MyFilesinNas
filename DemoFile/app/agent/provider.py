@@ -72,16 +72,21 @@ class DeepSeekProvider:
         self.timeout = timeout
 
     async def stream(self, options: GenerateOptions) -> AsyncIterator[StreamChunk]:
+        '''单次流式调用, 报错向上抛出 不做内部重试'''
+        # message: 从session得到的投影
+        # model: 允许waterfall拦截并更换模型
         payload: dict = {
             "model": options.model or self.model,
             "messages": _to_openai_messages(options.messages),
             "stream": True,
         }
+        # 转化内部工具定义 -> OpenAI格式
         if options.tools:
             payload["tools"] = [
                 {"type": "function", "function": dict(tool)} for tool in options.tools
             ]
 
+        # 记录已经发送的槽位
         started: set[int] = set()
         finish: FinishReason | None = None
         try:
@@ -95,16 +100,19 @@ class DeepSeekProvider:
                     if response.status_code != 200:
                         body = (await response.aread()).decode("utf-8", "replace")
                         raise LlmError(f"HTTP_{response.status_code}", body[:500])
+                    # 逐行读取sse流
                     async for line in response.aiter_lines():
                         if not line.startswith("data:"):
                             continue  # 空行 / ": keep-alive" 心跳
                         data = line[len("data:"):].strip()
+
+                        # 识别结束标记
                         if data == "[DONE]":
                             break
                         try:
                             chunk = json.loads(data)
                         except json.JSONDecodeError:
-                            continue  # 容忍解析不了的杂讯行
+                            continue  # 忽略脏数据
                         choices = chunk.get("choices") or []
                         if not choices:
                             continue  # usage 之类的尾块
@@ -118,6 +126,7 @@ class DeepSeekProvider:
                                 yield BlockStart(0, "text")
                             yield TextDelta(0, text)
 
+                        # 工具调用 OpenAI的工具槽位从0开始, 而文本占用了0 需要手动偏移
                         for call in delta.get("tool_calls") or []:
                             slot = 1 + int(call.get("index") or 0)
                             function = call.get("function") or {}
@@ -140,11 +149,13 @@ class DeepSeekProvider:
         except httpx.HTTPError as exc:
             raise LlmError("NETWORK_ERROR", f"{type(exc).__name__}: {exc}") from exc
 
+        # 未返回finish当作报错
         if finish is None:
             raise LlmError("STREAM_TRUNCATED", "流已结束但未收到 finish_reason")
         yield Finish(finish)
 
 
+# message从 mini-harness -> OpenAI
 def _to_openai_messages(messages: Sequence[ModelMessage]) -> list[dict]:
     """mini-harness 消息 → OpenAI chat.completions 消息。
 

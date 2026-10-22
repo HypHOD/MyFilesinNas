@@ -1,7 +1,5 @@
 """消息词汇与流式分片。
 
-实现对齐 dsh ``packages/llm/llm`` 的消息/流式词汇（docs/subsystems/llm-streaming.zh.md）：
-
 - 消息 = ``{role, content: ContentBlock[]}``，块 = text | tool_call；
 - 工具调用参数全程保持原始 JSON 字符串，由执行方解析；
 - 工具结果不是块，是独立 tool-role 的 ``ToolResultMessage``；

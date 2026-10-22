@@ -1,8 +1,5 @@
 """Agent 句柄与 inbox：对外控制面与驱动器装配。
 
-实现对齐 dsh ``packages/core/agent``（docs/subsystems/agent-lifecycle.zh.md、
-``packages/core/agent/src/runtime-types.ts``）：
-
 - ``Agent`` 是对外句柄：``followup``（排入下一轮）／``steer``（排入下一步并唤醒）／
   ``inject``（排入下一步但不唤醒）／``cancel``／``when_idle``；
 - inbox 两条队列：next_turn（轮次边界，每轮只领取一条）与 next_step（步边界，
@@ -26,6 +23,7 @@ from mini_harness.events import Disposer
 from mini_harness.session import Session
 
 
+# inbox消息载体 投递到agent收件箱
 @dataclass(frozen=True)
 class InboxMessage:
     id: str
@@ -40,6 +38,7 @@ class InboxMessage:
 
 class Inbox:
     """两条队列 + 唤醒事件；句柄与 loop 之间唯一的交互点。"""
+    # 双队列区分 turn消息 和 step消息
 
     def __init__(self) -> None:
         self.next_turn: deque[InboxMessage] = deque()  # 轮次边界领取：每轮只取一条
@@ -122,13 +121,13 @@ class Agent:
     # -- 控制面 ----------------------------------------------------------
 
     def followup(self, content: str, *, source: str = "user") -> InboxMessage:
-        """排入下一轮并唤醒 loop。"""
+        """排入下一个turn并唤醒 loop。"""
         # 当前 turn 彻底结束后，下一轮才处理（排队新任务）。
         message = self._enqueue(content, source, step=False)
         return message
 
     def steer(self, content: str, *, source: str = "steer") -> InboxMessage:
-        """排入下一步并唤醒 loop；loop 空闲时该消息开启新轮次。"""
+        """排入下一step并唤醒 loop；loop 空闲时该消息开启新轮次。"""
         # 打断式插队：当前 step 结束后立即进入下一 step 处理。
         return self._enqueue(content, source, step=True)
 
@@ -196,6 +195,7 @@ class AgentDriver(Protocol):
     def start(self, agent: Agent) -> asyncio.Task[None]: ...
 
 
+# agent注册表 挂在、实例创建、生命周期管理
 class AgentRegistry:
     """注册在 ``ctx.agents``：装配 agent 并管理其生命周期。"""
 
@@ -206,6 +206,7 @@ class AgentRegistry:
         self._counter = 0
 
     def register_driver(self, driver: AgentDriver) -> Disposer:
+        '''只允许一个driver存在的注册、返回注销器'''
         if self._driver is not None:
             raise RuntimeError("an agent driver is already registered")
         self._driver = driver
@@ -224,6 +225,7 @@ class AgentRegistry:
         model: str = "mock",
         system_prompt: str | None = None,
     ) -> Agent:
+        '''新建agent实例: 创建独立session 激活常驻loop'''
         if self._driver is None:
             raise RuntimeError("no agent driver registered (mount AgentLoopPlugin first)")
         self._counter += 1
@@ -249,6 +251,7 @@ class AgentRegistry:
         return self._agents.get(agent_id)
 
     def list(self) -> tuple[Agent, ...]:
+        '''返回全部agent实例'''
         return tuple(self._agents.values())
 
     async def dispose(self, agent: Agent) -> None:
@@ -269,7 +272,7 @@ class AgentRegistry:
 
 
 class AgentsPlugin:
-    """提供 ``ctx.agents`` 服务；插件卸载时停掉全部 agent。"""
+    """插件注册入口 提供卸载agent"""
 
     name = "agents"
 

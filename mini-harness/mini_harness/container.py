@@ -1,4 +1,6 @@
-"""插件容器：Context、服务注册、inject 等待、effect/disposer、插件挂载。
+"""Context插件容器 用于服务注册 / inject等待 / effect撤销
+    实现插件相互依赖但是加载顺序不固定
+    ## 简化放弃scope过滤分发: 使用扁平化共享总线和前缀命名实现
 
 实现语义对齐 dsh 的 Cordis 容器（docs/cordis-primer.zh.md）：
 
@@ -74,14 +76,14 @@ class Context:
         self._effects: list[Disposer] = []   # 本作用域的撤销栈（LIFO）
         self._disposed = False
         if parent is None:
-            # 只有根 Context 持有全局状态：服务表、事件总线、待激活队列、子作用域表
+            # 根 Context 持有全局状态, 实现数据区物理共享的插件通信
             self._services: dict[str, Any] = {}
             self._emitter = Emitter()
             self._parked: list[_ParkedPlugin] = []
             self._activations: set[asyncio.Task[None]] = set()
             self._children: list[Context] = []
         else:
-            # 子 Context（插件作用域）登记到根，卸载时由父级统一撤销
+            # 子 Context 将内容登记到根，卸载时由根 Context 统一撤销
             parent._root._children.append(self)
 
     # -- 服务 ------------------------------------------------------------
@@ -92,12 +94,15 @@ class Context:
             raise RuntimeError(f"service already provided: {name!r}")
         self._root._services[name] = service
 
+        # 不del 防止重复调用报错
         def dispose() -> None:
             self._root._services.pop(name, None)
 
+        # 容器内记录每个服务的撤销事务 
         self.effect(dispose)
         # 新服务可能补齐挂起插件的 inject，立即重试激活；插件挂载顺序因此无关。
         self._root._activate_parked()
+        # 交给调用方一个撤销句柄 提前撤销允许
         return dispose
 
     def get(self, name: str) -> Any | None:
@@ -131,7 +136,7 @@ class Context:
         for child in list(self._root._children):
             if child._parent is self:
                 await child.dispose()
-        # LIFO 撤销：后注册的先撤销（例如先摘监听器，再关闭它依赖的服务）。
+        # LIFO 撤销：后注册的先撤销, 先撤销无依赖
         for dispose in reversed(self._effects):
             result = dispose()
             if inspect.isawaitable(result):
@@ -144,11 +149,13 @@ class Context:
     # -- 事件 ------------------------------------------------------------
 
     def on(self, name: str, listener: Listener) -> Disposer:
-        """注册事件监听器；撤销注册随本 ctx 的副作用栈（对照 dsh 的 ``ctx.on``）。"""
+        """注册事件监听器；撤销注册随本 ctx 的副作用栈"""
         # 监听器挂在根 Emitter 上（共享总线），disposer 归属本插件作用域：
         # 插件卸载时自动摘除，避免留下指向已卸载对象的回调。
         return self.effect(self._root._emitter.register(name, listener))
 
+    # 四种分法模式
+    # 同步遍历
     def emit(self, name: str, *args: Any) -> None:
         self._root._emitter.emit(name, *args)
 

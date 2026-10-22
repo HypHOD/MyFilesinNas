@@ -60,20 +60,22 @@ class Emitter:
 
     async def drain(self) -> None:
         """等待所有由 emit 调度的异步监听器完成；监听器抛错会在此处重新抛出。"""
-        # 循环而不是 gather 一次就结束：监听器执行期间可能又 emit 出新的后台任务。
+        # 循环执行: 而不是 gather 一次就结束：监听器执行期间可能又 emit 出新的后台任务。
         while self._pending:
             results = await asyncio.gather(*list(self._pending), return_exceptions=True)
             for result in results:
+                # 捕获执行错误
                 if isinstance(result, BaseException):
                     raise result
 
     async def serial(self, name: str, *args: Any) -> list[Any]:
         """按注册序依次 await，返回每个监听器的返回值列表。"""
-        # 终结检查点：所有监听器都要表态，调用方拿到完整结果列表（如 turn-stopping）。
+        # 终结检查点：所有监听器结果表态，调用方拿到完整结果列表
         results: list[Any] = []
         for listener in list(self._listeners.get(name, ())):
             result = listener(*args)
             if inspect.isawaitable(result):
+                # await串行所有任务
                 result = await result
             results.append(result)
         return results
@@ -83,22 +85,28 @@ class Emitter:
         # 瀑布链 = 递归的洋葱模型：listener(*inner, next_) 调了 next_ 才进入下一层；
         # 不调 next_ 直接 return 就是短路——后续监听器和 default 都不会执行。
         # 例：guard_plugin 命中路径穿越时直接 return PreToolDeny，工具执行被整段跳过。
+
+        # 取出事件名对应全部监听器列表
         listeners = list(self._listeners.get(name, ()))
 
         async def call(index: int, *inner: Any) -> Any:
             if index >= len(listeners):
-                # 链尾：落到默认实现（如真正执行工具、默认放行、默认拒绝）。
+                # 递归到达链尾：落到默认实现
                 if default is None:
                     return None
                 result = default(*inner)
                 return await result if inspect.isawaitable(result) else result
+            # 取到本层监听器
             listener = listeners[index]
 
+            # 交给listener的手动触发下一层
             async def next_(*forwarded: Any) -> Any:
                 # 不传参 → 沿用当前参数（与 dsh/JS 的 next() 语义一致）；传参则替换。
                 return await call(index + 1, *(forwarded if forwarded else inner))
 
+            # 执行listener & 传入next
             result = listener(*inner, next_)
+            # await调用保证外层等待内层
             return await result if inspect.isawaitable(result) else result
-
+        # 启动
         return await call(0, *args)

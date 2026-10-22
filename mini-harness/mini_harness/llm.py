@@ -1,19 +1,13 @@
 """LLM 接缝：提供方协议、流式分片折叠器与脚本化 Mock 提供方。
 
-实现对齐 dsh ``packages/llm/llm``（docs/subsystems/llm-streaming.zh.md）：
-
 - 提供方最小形状：``stream(options) -> AsyncIterator[StreamChunk]``；
 - 一次调用 = 一次提供方尝试，库内不重试（重试走 ``agent/request-error`` 事件）；
 - 失败抛 ``LlmError(code)``，code 用于消费方路由；
 - BlockAssembler 把分片折叠回完整 assistant 消息
-  （对照 ``packages/llm/llm/src/assembler.ts``）。
 
 未实现：多适配器路由（简化为按 name 查找）、usage 计量、推理/图片块、
 prepareCall、llm-retry 服务；保留 ``max_tokens`` 截断时丢弃工具调用的规则。
 
-``agent_loop._generate()`` 的一次请求 = ``provider.stream()`` + ``BlockAssembler``
-折叠；重试不在本文件，``LlmError`` 抛给 ``agent/request-error`` 决定。MockProvider
-供 demo/测试离线使用，按脚本逐条吐出分片。
 """
 
 from __future__ import annotations
@@ -61,9 +55,8 @@ class LlmProvider(Protocol):
     """提供方协议：一次调用产出一条流式响应。"""
 
     name: str
-
+    # 厂商LLM只需要实现stream; stream可以包含流式和非流式
     def stream(self, options: GenerateOptions) -> AsyncIterator[StreamChunk]: ...
-
 
 @dataclass(frozen=True)
 class AssistantOutcome:
@@ -72,20 +65,16 @@ class AssistantOutcome:
 
 
 class BlockAssembler:
-    """按 ``index`` 槽位折叠流式分片，还原一条 assistant 消息。
-
-    规则（对照 dsh assembler）：首个 tool_call 分片携带 id/name，后续只带
-    arguments_delta；参数全程保持原始字符串；``max_tokens`` 截断时丢弃全部
-    工具调用（参数不完整，不可安全执行）。
-    """
+    """按 ``index`` 槽位折叠流式分片，还原一条 assistant 消息"""
 
     def __init__(self) -> None:
         # index → 槽位；不同 index 的文本块/工具调用可以交错到达，最终按 index 排序。
         self._slots: dict[int, dict[str, Any]] = {}
         self._finish_reason: FinishReason | None = None
-        self._text_prefix = ""  # 全部文本的已到达前缀（取消时落 interrupted 消息用）
+        self._text_prefix = ""  # 累计到达文本
 
     def push(self, chunk: StreamChunk) -> None:
+        '''增量组装 得到单个流式分片'''
         if isinstance(chunk, BlockStart):
             # 新开一个 index 槽位；后续 delta 都往这个槽里累积
             self._slots[chunk.index] = {
@@ -96,10 +85,12 @@ class BlockAssembler:
                 "args": "",
             }
         elif isinstance(chunk, TextDelta):
+            # 文本增量片段就追加
             slot = self._slots[chunk.index]
             slot["text"] += chunk.text
             self._text_prefix += chunk.text  # 同时维护取消时用的文本前缀
         elif isinstance(chunk, ToolCallDelta):
+            # 工具调用增量片段
             slot = self._slots[chunk.index]
             if chunk.id is not None:  # 首个分片携带 id/name
                 slot["id"] = chunk.id
@@ -107,8 +98,10 @@ class BlockAssembler:
                 slot["name"] = chunk.name
             slot["args"] += chunk.arguments_delta  # 参数只是字符串拼接，解析在执行前
         elif isinstance(chunk, BlockEnd):
+            # 块结束标记 无需额外收尾
             pass  # 槽位已足够自描述，无需额外收尾
         elif isinstance(chunk, Finish):
+            # 流结束标记; 保存结束原因
             # 结束原因留给 outcome() 决定收尾策略
             self._finish_reason = chunk.reason
 
@@ -118,9 +111,11 @@ class BlockAssembler:
         return self._text_prefix
 
     def outcome(self) -> AssistantOutcome:
+        # 消耗完流的最终组装结果
         blocks: list[TextBlock | ToolCallBlock] = []
         # max_tokens 截断时参数不完整，工具调用不可安全执行 → 全部丢弃（对照 dsh assembler）
         drop_tool_calls = self._finish_reason == "max_tokens"
+        # 按照index升序填槽
         for index in sorted(self._slots):
             slot = self._slots[index]
             if slot["type"] == "text":
@@ -195,7 +190,7 @@ class LlmService:
         self._providers: dict[str, LlmProvider] = {}
 
     def register(self, provider: LlmProvider) -> Disposer:
-        # 与 ToolRegistry 同一套模式：注册返回 disposer，由插件作用域负责撤销。
+        # 注册LLM提供方 返回 disposer由插件卸载
         if provider.name in self._providers:
             raise RuntimeError(f"llm provider already registered: {provider.name!r}")
         self._providers[provider.name] = provider
@@ -206,6 +201,7 @@ class LlmService:
         return dispose
 
     def get(self, name: str) -> LlmProvider:
+        '''按照提供方名称查找实例'''
         provider = self._providers.get(name)
         if provider is None:
             raise LlmError("NO_PROVIDER", f"no llm provider registered for {name!r}")
@@ -213,7 +209,7 @@ class LlmService:
 
 
 class LlmPlugin:
-    """提供 ``ctx.llm`` 服务并注册初始提供方。"""
+    """插件入口 提供 ``ctx.llm`` 服务并注册初始提供方。"""
 
     name = "llm"
 
@@ -221,6 +217,7 @@ class LlmPlugin:
         self._providers = tuple(providers)
 
     def apply(self, ctx) -> None:
+        # 插件应用钩子 注入并注册
         service = LlmService()
         ctx.provide("llm", service)
         for provider in self._providers:

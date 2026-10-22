@@ -1,7 +1,5 @@
 """仅追加的会话事件日志与模型历史投影。
 
-实现对齐 dsh ``packages/core/session``（docs/subsystems/session.zh.md）：
-
 - ``SessionEvent{type, seq, time, data}``：seq 单调递增，日志仅追加；
 - 核心事件：system/message、user/message、assistant/message、tool/call、tool/result、
   turn/start、turn/end、step/start、step/end；

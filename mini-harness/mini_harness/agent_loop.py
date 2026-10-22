@@ -1,23 +1,9 @@
 """默认驱动器：turn/step 状态机 + 拦截点 + 取消合成。
 
-实现对齐 dsh ``packages/core/agent-loop``（docs/subsystems/agent-lifecycle.zh.md）：
-
-- 一次 followup = 一个 turn；turn 内含若干 step；step 产出了工具调用或有新输入
-  则续 step，否则过 ``agent/turn-stopping``（serial）后收口 ``turn/end``；
-- 拦截点：``agent/pre-step``（waterfall：enter | reject，决定领取的输入是否入账）、
-  ``agent/request``（waterfall：可改写 provider/model）、``agent/request-error``
-  （waterfall：retry 同一 step 或上抛）；
-- 工具调度（对照 ``packages/core/agent-loop/src/tool-calls.ts``）：先按模型序把
-  全部 ``tool/call`` 落盘；默认独占屏障逐个执行，连续一段显式
-  ``is_concurrency_safe`` 的调用走有界并行池；结果按模型序提交；
-- 取消：已开工的调用合成「outcome is unknown」，未派发的合成
-  「aborted before dispatch」，保证日志里每个 tool/call 都有对应结果；
-  失败与取消都不终止 loop（对照 agent.ts）。
-
 未实现：重试预算、usage 记账、实时流帧。request-error 重试不设次数上限，
 由监听器把关。
 
-主要方法：
+
     _run            常驻循环：等唤醒 → 领取 → 跑一轮
     _run_turn       轮次状态机：pre-step 入账 → step 循环 → turn-stopping → turn/end
     _run_step       单步：请求模型 → 若有 tool_calls 则调度工具
@@ -57,8 +43,7 @@ from mini_harness.tools import run_tool_pipeline
 
 
 # -- 拦截点决策（闭联合） --------------------------------------------------
-
-
+# pre-step 决定是否将inbox消息放入日志
 @dataclass(frozen=True)
 class PreStepEnter:
     messages: tuple[InboxMessage, ...]
@@ -72,6 +57,7 @@ class PreStepReject:
 PreStepDecision = PreStepEnter | PreStepReject
 
 
+# 请求规格
 @dataclass(frozen=True)
 class RequestSpec:
     provider: str
@@ -87,10 +73,9 @@ class RequestErrorRetry:
 class RequestErrorRaise:
     """上抛为轮次错误（turn/end status=error），loop 继续存活。"""
 
-
 RequestErrorDecision = RequestErrorRetry | RequestErrorRaise
 
-
+# 轮次零食状态 用于合成中断状态
 @dataclass
 class _TurnState:
     """轮次进行中的易失状态；取消合成依赖它定位中断位置。"""
@@ -116,6 +101,7 @@ class AgentLoop:
     # -- 主循环 ----------------------------------------------------------
 
     async def _run(self, agent: Agent) -> None:
+        '''常驻的住循环: 等待唤醒/拉取, 单次中断吧u回推出loop'''
         # 常驻循环：空闲时等待 inbox 唤醒，有消息则跑一轮。
         # cancel() 只中止当前轮，loop 本身不退出。
         try:
@@ -137,6 +123,7 @@ class AgentLoop:
             agent.mark_idle()
 
     async def _run_turn(self, agent: Agent) -> None:
+        '''单轮turn状态机 step循环知道不产生新工具消息'''
         session = agent.session
         # turn 编号取自 turn/start 事件数；日志只增，编号天然单调。
         turn_no = len(session.events_of("turn/start")) + 1
@@ -191,7 +178,7 @@ class AgentLoop:
             session.append("turn/end", TurnEnd(turn=turn_no, status=status))
 
     # -- 单个 step -------------------------------------------------------
-
+    # 每次确定下一次是否继续step
     async def _run_step(self, agent: Agent, turn_no: int, step_no: int, state: _TurnState) -> bool:
         session = agent.session
         # step 边界落日志，方便把「一次请求 + 它的工具调用」圈在一起
